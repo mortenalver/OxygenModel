@@ -42,7 +42,7 @@ public class FullFarmSimulations {
 
         // Save files:
         String saveDir = "./";
-        String simNamePrefix = "test5_";
+        String simNamePrefix = "test2_2m_";
         String simNamePostfix = "";
 
         boolean[][][] mask = null;
@@ -67,14 +67,14 @@ public class FullFarmSimulations {
         }
         // Simulation start time:
         int initYear = 2022, initMonth = Calendar.JUNE, initDate = 22+daysToAdd, initHour = 0, initMin = 0, initSec = 0;
-        double t_end = 24*3600;//1*24*3600; // Duration of simulation
+        double t_end = 6*3600;//24*3600;//1*24*3600; // Duration of simulation
         int nSim = 1; // Number of days to simulate (separate sims)
         int startAt = 0; // Set to >0 to skip one of more simulations, but count them in the sim numbering
 
         // Domain settings and farm layout:
         boolean[][] cageGrid = new boolean[][] {{true, true}, {true, false}, {true, true}, {true, false}};
         double frameSize = 90; // Rammefortøyning
-        double outerPadding = 140; // Ekstra rom utenfor rammefortøyningene
+        double outerPadding = 90; // Ekstra rom utenfor rammefortøyningene
         double farmRotation = 45; // degrees of rotation of the model domain from north-east orientation.
             // Current directions should be rotated by -1 times this angle
         double[] domainDims = new double[] {2*outerPadding + frameSize*cageGrid.length,
@@ -362,6 +362,17 @@ public class FullFarmSimulations {
             String filePrefix = simNamePrefix+filenameForm.format(startTime);
 
             NetcdfFileWriteable ncfile = SaveNetCDF.initializeFile(saveDir + filePrefix + simNamePostfix+".nc", cageDims, 1, 1, unitString);
+            ncfile.addGlobalAttribute("dxy", dxy);
+            ncfile.addGlobalAttribute("dz", dz);
+            ncfile.addGlobalAttribute("cageRad", rad);
+            ncfile.addGlobalAttribute("mainCage", mainCage);
+            // Make string describing cage layout:
+            StringBuilder sb = new StringBuilder();
+            for (double[] cp : cagePositions) {
+                sb.append(cp[0]).append(",").append(cp[1]).append(";");
+            }
+            ncfile.addGlobalAttribute("cagePositions", sb.toString());
+
             NetcdfFileWriteable fishfile = SaveNetCDF.initializeFile(saveDir + filePrefix + simNamePostfix+"_fish.nc", new int[]{fish.getNGroups(), 1, cageDims[2]}, 1, 1, unitString);
             SaveNetCDF.createCageVariables(ncfile, "feed", "ingDist", "o2", "o2consDist");
             SaveNetCDF.createProfileVariable(fishfile, "appetite", 0);

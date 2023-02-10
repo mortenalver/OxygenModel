@@ -85,6 +85,34 @@ public class SaveNetCDF {
         }
     }
 
+    public static void setGlobalAttribute(NetcdfFileWriteable ncfile, String attName, double value) {
+        try {
+            ncfile.setRedefineMode(true);
+            ncfile.addGlobalAttribute(attName, value);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static void setGlobalAttribute(NetcdfFileWriteable ncfile, String attName, int value) {
+        try {
+            ncfile.setRedefineMode(true);
+            ncfile.addGlobalAttribute(attName, value);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static void setGlobalAttribute(NetcdfFileWriteable ncfile, String attName, String value) {
+        try {
+            ncfile.setRedefineMode(true);
+            ncfile.addGlobalAttribute(attName, value);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+
     private static void createTimeVariable(NetcdfFileWriteable ncfile, String units) {
         ArrayList<Dimension> dimensions = new ArrayList<Dimension>();
         dimensions.add(ncfile.findDimension("time"));
