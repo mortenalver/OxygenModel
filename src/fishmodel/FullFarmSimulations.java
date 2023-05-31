@@ -14,7 +14,6 @@ import java.text.NumberFormat;
 import java.text.SimpleDateFormat;
 import java.util.*;
 
-import fishmodel.sim.CurrentMagicFields;
 import fishmodel.sim.InputDataNetcdf;
 import org.apache.commons.math3.analysis.interpolation.LinearInterpolator;
 import org.apache.commons.math3.analysis.polynomials.PolynomialSplineFunction;
@@ -42,7 +41,7 @@ public class FullFarmSimulations {
 
         // Save files:
         String saveDir = "./";
-        String simNamePrefix = "test2_2m_";
+        String simNamePrefix = "FF_decrCurr"; //"ff_3m_curr0.7_";
         String simNamePostfix = "";
 
         boolean[][][] mask = null;
@@ -50,9 +49,10 @@ public class FullFarmSimulations {
         boolean maskO2WhenSaving = false;
 
         boolean varyAmbient = false; // Reduction in ambient values towards the rest of the farm
-        double addRedMult = 0.015; // Scale factor for reduction in ambient values
 
         boolean useVerticalDist = true;
+
+        boolean decreasingCurrentFactor = true;
 
         boolean includeHypoxiaAvoidance = true;
         int checkAvoidanceInterval = 30, checkAvoidanceCount = 0;
@@ -67,24 +67,26 @@ public class FullFarmSimulations {
         }
         // Simulation start time:
         int initYear = 2022, initMonth = Calendar.JUNE, initDate = 22+daysToAdd, initHour = 0, initMin = 0, initSec = 0;
-        double t_end = 6*3600;//24*3600;//1*24*3600; // Duration of simulation
+        double t_end = 24*3600;//24*3600;//1*24*3600; // Duration of simulation
         int nSim = 1; // Number of days to simulate (separate sims)
         int startAt = 0; // Set to >0 to skip one of more simulations, but count them in the sim numbering
 
         // Domain settings and farm layout:
+        boolean includeExtPos = true; // Include ext O2 sensor position (barge) placed (-2.39 , -0.36) frames from the center of the upper left cage
         boolean[][] cageGrid = new boolean[][] {{true, true}, {true, false}, {true, true}, {true, false}};
         double frameSize = 90; // Rammefortøyning
         double outerPadding = 90; // Ekstra rom utenfor rammefortøyningene
-        double farmRotation = 45; // degrees of rotation of the model domain from north-east orientation.
+        double outerPaddingLeft = includeExtPos ? 3*frameSize : outerPadding;
+        double farmRotation = 42;// 42 er mer riktig enn 45 i hht. Google Earth-bilde. 45; // degrees of rotation of the model domain from north-east orientation.
             // Current directions should be rotated by -1 times this angle
-        double[] domainDims = new double[] {2*outerPadding + frameSize*cageGrid.length,
+        double[] domainDims = new double[] {outerPadding + outerPaddingLeft + frameSize*cageGrid.length,
                 2*outerPadding + frameSize*cageGrid[0].length};
         System.out.println("Domain dims: "+domainDims[0]+" x "+domainDims[1]);
         ArrayList<double[]> cagePositions = new ArrayList<>();
         for (int i=0; i<cageGrid.length; i++)
             for (int j=0; j<cageGrid[i].length; j++) {
                 if (cageGrid[i][j]) {
-                    cagePositions.add(new double[] {outerPadding + frameSize*((double)i +0.5),
+                    cagePositions.add(new double[] {outerPaddingLeft + frameSize*((double)i +0.5),
                             outerPadding + frameSize*((double)j +0.5)});
                     double[] pos = cagePositions.get(cagePositions.size()-1);
                     System.out.println("Cage: "+pos[0]+" x "+pos[1]);
@@ -97,12 +99,14 @@ public class FullFarmSimulations {
         // Cage settings:
         double rad = 25;
         double depth = 25, totDepth = 25; // Cage size (m)
-        double dxy = 3, dz = 3; // Model resolution (m)
+        double dxy = 2, dz = 2; // Model resolution (m)
         double dt = .5 * dxy; // Time step (s)
         int storeIntervalFeed = 600, storeIntervalInfo = 60;
         double fishMaxDepth = 20; // The maximum depth of the fish under non-feeding conditions
 
         double currentReductionFactor = 0.8; // Multiplier for inside current as function of outside
+        if (decreasingCurrentFactor)
+            currentReductionFactor = 0.8 + 0.05 - ((double)daysToAdd)*(0.2/*0.25*//8.0);
 
         // Environmental conditions:
         double currentSpeedInit = 2*0.04; // External current speed (m/s)
@@ -119,13 +123,31 @@ public class FullFarmSimulations {
         // Oxygen sensor positions:
         String[] o2Names = new String[] {"C_5", "C_10", "C_15", "M1_5", "M1_10", "M1_15", "M2_5", "M2_10", "M2_15",
                 "M3_5", "M3_10", "M3_15"};
+        double[] o2Depth = new double[] {5, 10, 15, 5, 10, 15, 5, 10, 15, 5, 10, 15}; // Sensor depth (m)
+        int nCageSensors = o2Names.length;
+        if (includeExtPos) { // Add sensor names for the external sensor position:
+            String[] tmp = o2Names;
+            double[] tmpD = o2Depth;
+            o2Names = new String[tmp.length+3];
+            o2Depth = new double[tmpD.length+3];
+            for (int i=0; i<tmp.length; i++) {
+                o2Names[i] = tmp[i];
+                o2Depth[i] = tmpD[i];
+            }
+            o2Names[tmp.length] = "Ext_5";
+            o2Names[tmp.length+1] = "Ext_10";
+            o2Names[tmp.length+2] = "Ext_15";
+            o2Depth[tmpD.length] = 5;
+            o2Depth[tmpD.length+1] = 10;
+            o2Depth[tmpD.length+2] = 15;
+        }
         // angles: M1 128.2948, M2 2.8445, M3 246.8427
         double angle1 = 128.2948-farmRotation, angle2 = 2.8445-farmRotation, angle3 = 246.8427-farmRotation; // Angles are adjusted for domain rotation
         double[] sensorAngles = new double[] {0, 0, 0, angle1, angle1, angle1, angle2, angle2, angle2,
                 angle3, angle3, angle3};
         //double[] o2Rad = new double[] {0.6, 0.6, 0.6, 0.6}; // Distance from centre as fraction of cage radius
-        double[] o2Rad = new double[] {0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1}; // Distance from centre as fraction of cage radius
-        double[] o2Depth = new double[] {5, 10, 15, 5, 10, 15, 5, 10, 15, 5, 10, 15}; // Sensor depth (m)
+        //double[] o2Rad = new double[] {0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1}; // Distance from centre as fraction of cage radius
+        double[] o2Rad = new double[] {0, 0, 0, 0.98, 0.98, 0.98, 0.98, 0.98, 0.98, 0.91, 0.91, 0.91};
 
         // Fish setup (N, mean weight and std.dev weight):
         double nFishBjoroya = cagePositions.size()*169821; // Estimated number of individuals in experimental period (source: FishTalk data)
@@ -204,13 +226,27 @@ public class FullFarmSimulations {
         // Set up o2 sensor positions in grid:
         int[][] o2Pos = new int[o2Names.length][3];
         for (int i=0; i<o2Names.length; i++) {
-            int xDist = (int)(o2Rad[i]*rad*Math.sin(Math.PI*sensorAngles[i]/180.)/dxy + mainCageCenter[0]/dxy);
-            int yDist = (int)(o2Rad[i]*rad*Math.cos(Math.PI*sensorAngles[i]/180.)/dxy + mainCageCenter[1]/dxy);
-            int zDist = (int)(o2Depth[i]/dz);
-            System.out.println(o2Names[i]+": "+xDist+" , "+yDist+" , "+zDist);
-            o2Pos[i][0] = xDist;
-            o2Pos[i][1] = yDist;
-            o2Pos[i][2] = zDist;
+            if (i < nCageSensors) {
+                int xDist = (int) (o2Rad[i] * rad * Math.sin(Math.PI * sensorAngles[i] / 180.) / dxy + mainCageCenter[0] / dxy);
+                int yDist = (int) (o2Rad[i] * rad * Math.cos(Math.PI * sensorAngles[i] / 180.) / dxy + mainCageCenter[1] / dxy);
+                int zDist = (int) (o2Depth[i] / dz);
+                System.out.println(o2Names[i]+": "+xDist+" , "+yDist+" , "+zDist+", mask="+mask[xDist][yDist][zDist]);
+                o2Pos[i][0] = xDist;
+                o2Pos[i][1] = yDist;
+                o2Pos[i][2] = zDist;
+            } else {
+                // Not one of the cage sensors, so this is the external position:
+                // Place relative to the second cage:
+                double[] cagePos0 = cagePositions.get(1);
+                int xDist = (int)((cagePos0[0] - frameSize*2.39)/dxy);
+                int yDist = (int)((cagePos0[1] - frameSize*0.36)/dxy);
+                int zDist = (int) (o2Depth[i] / dz);
+                System.out.println(o2Names[i] + ": " + xDist + " , " + yDist + " , " + zDist);
+                o2Pos[i][0] = xDist;
+                o2Pos[i][1] = yDist;
+                o2Pos[i][2] = zDist;
+            }
+
         }
 
         // Feed affinity:
@@ -238,7 +274,7 @@ public class FullFarmSimulations {
                 0.6467, 0.5901, 0.5630, 0.5393, 0.5228, 0.5152};
         double[] affProfile_flat = new double[] {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
-        double[] affProfile = useVerticalDist ? affProfile_half : affProfile_flat;
+        double[] affProfile = useVerticalDist ? affProfile_orig : affProfile_flat;
 
 
         double[] affDepths = new double[] {0.5000, 1.5000, 2.5000, 3.5000, 4.5000, 5.5000, 6.5000, 7.5000, 8.5000,
@@ -292,9 +328,7 @@ public class FullFarmSimulations {
             AdvectPellets ap = new AdvectPellets();
             AdvectPellets apOx = new AdvectPellets();
             if (varyAmbient) {
-                apOx.setVaryAmbient(true, addRedMult,
-                        new double[] {cageDims[0], cageDims[1]/2},
-                        new double[] {1, 0});
+                apOx.setVaryAmbient(true, affinityProfile);
 
             }
 
@@ -302,7 +336,7 @@ public class FullFarmSimulations {
             String inDataFile = "C:/Users/alver/OneDrive - NTNU/prosjekt/O2_Bjørøya/bjoroya_data.nc";
             if (!(new File(inDataFile)).exists())
                 inDataFile = "bjoroya_data.nc";
-            InputDataNetcdf inData = new InputDataNetcdf(inDataFile);
+            InputDataNetcdf inData = new InputDataNetcdf(inDataFile, true);
             inData.setStartTime(startTime);
 
 

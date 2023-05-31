@@ -28,17 +28,19 @@ public class InputDataNetcdf {
     private static double currentDirOffset = 25;
     private Random random = new Random();
 
+    private double[] addTemperatureOffsets = new double[] {0, 0, 0};
+
     private boolean multipleLayers = false; // Set to true if the NetCDF file gives full current profiles
-    public InputDataNetcdf(String filepath) {
+    public InputDataNetcdf(String filepath, boolean useInstantaneousAmbientVals) {
 
         try {
             NetcdfFile ncfile = NetcdfFile.open(filepath);
             Variable time = ncfile.findVariable("time");
             Variable spd = ncfile.findVariable("extCurrentSpeed");
             Variable direction = ncfile.findVariable("extCurrentDir");
-            Variable o2amb5 = ncfile.findVariable("O2ambient_5");
-            Variable o2amb10 = ncfile.findVariable("O2ambient_10");
-            Variable o2amb15 = ncfile.findVariable("O2ambient_15");
+            Variable o2amb5 = ncfile.findVariable(useInstantaneousAmbientVals ? "O2ambient_5" : "O2constAmbient_5");
+            Variable o2amb10 = ncfile.findVariable(useInstantaneousAmbientVals ? "O2ambient_10" : "O2constAmbient_10");
+            Variable o2amb15 = ncfile.findVariable(useInstantaneousAmbientVals ? "O2ambient_15" : "O2constAmbient_15");
             //Variable feedingBitfield = ncfile.findVariable("feedingBitfield");
             Variable temp5 = ncfile.findVariable("temperature_5");
             Variable temp10 = ncfile.findVariable("temperature_10");
@@ -105,9 +107,9 @@ public class InputDataNetcdf {
                 o2ambVal10[i] = o2ambdata10.get(i);
                 o2ambVal15[i] = o2ambdata15.get(i);
                 //feedingVal[i] = feedingdata.get(i);
-                temperatures5[i] = tempdata5.get(i);
-                temperatures10[i] = tempdata10.get(i);
-                temperatures15[i] = tempdata15.get(i);
+                temperatures5[i] = tempdata5.get(i) + addTemperatureOffsets[0];
+                temperatures10[i] = tempdata10.get(i) + addTemperatureOffsets[1];
+                temperatures15[i] = tempdata15.get(i) + addTemperatureOffsets[2];
             }
             if (multipleLayers) {
                 for (int i=0; i<times.length; i++) {

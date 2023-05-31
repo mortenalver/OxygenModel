@@ -21,9 +21,10 @@ public class AdvectPellets {
     int counter = 0;
 
     private boolean varyAmbient = false;
-    private double[] ambRedCenter = null;
-    private double[] dsVector = null;
-    private double ambRedMult = 0;
+    //private double[] ambRedCenter = null;
+    //private double[] dsVector = null;
+    //private double ambRedMult = 0;
+    private double[] affinityProfile;
 
     private double[][][] advect = null, diffus = null, newValues = null;
 
@@ -193,19 +194,18 @@ public class AdvectPellets {
      * Activate linear reduction in ambient values dependent on distance measured along the normal
      * from the point ambRedCenter backwards along the vector dsVector.
      * @param varyAmbient
-     * @param ambRedMult
-     * @param ambRedCenter
-     * @param dsVector
      */
-    public void setVaryAmbient(boolean varyAmbient, double ambRedMult, double[] ambRedCenter, double[] dsVector) {
+    public void setVaryAmbient(boolean varyAmbient, /*double ambRedMult, double[] ambRedCenter, double[] dsVector,*/
+                               double[] affinityProfile) {
         this.varyAmbient = varyAmbient;
-        this.ambRedMult = ambRedMult;
+        /*this.ambRedMult = ambRedMult;
         this.ambRedCenter = new double[2];
         this.ambRedCenter[0] = ambRedCenter[0];
         this.ambRedCenter[1] = ambRedCenter[1];
         this.dsVector = new double[2];
         this.dsVector[0] = dsVector[0];
-        this.dsVector[1] = dsVector[1];
+        this.dsVector[1] = dsVector[1];*/
+        this.affinityProfile = affinityProfile;
 
     }
 
@@ -373,27 +373,32 @@ public class AdvectPellets {
                         // Check if we are near an edge, otherwise the ambient value has no effect:
                         if (i<2 || j<2 || i>=feed.length-2 || j>=feed[0].length-2 || k<2 || k>=feed[0][0].length-2) {
 
-                            double[] vecHere = new double[]{((double) i) - ambRedCenter[0], ((double) j) - ambRedCenter[1]};
-                            double dotProd = vecHere[0] * dsVector[0] + vecHere[1] * dsVector[1];
-                            double ambRedValue = 0;
-                            if (dotProd < 0) {
-                                double[] currHere = new double[] {currentSpeed[i][j][k][0] + currentSpeedOffset[0],
-                                        currentSpeed[i][j][k][1] + currentSpeedOffset[1]};
-                                double currHereSpeed = 100.*Math.sqrt(currHere[0]*currHere[0]+currHere[1]*currHere[1]);
-                                //double multiplier = Math.max(0.5, Math.min(2, 4.5/(currHereSpeed)));
-                                double multiplier = 1.1*Math.max(0.5, Math.min(2.5, 0.35*(7.4-currHereSpeed)));
-                                //System.out.println(currHereSpeed+"\t"+multiplier);
-                                ambRedValue = -dotProd * ambRedMult * multiplier * dxy;
-                            }
-
-                            /*
-                            // Reduction dependent on the dot product of the current direction and dsVector:
-
+                            //double[] vecHere = new double[]{((double) i) - ambRedCenter[0], ((double) j) - ambRedCenter[1]};
+                            double ambRedValue = 0, ambRedValue2 = 0, multiplier = 0;
+                            //double tmp1 = 0, tmp2 = 0;
                             double[] currHere = new double[] {currentSpeed[i][j][k][0] + currentSpeedOffset[0],
                                     currentSpeed[i][j][k][1] + currentSpeedOffset[1]};
-                            double currHereSpeed = Math.sqrt(currHere[0]*currHere[0]+currHere[1]*currHere[1]);
-                            double dotProd =  (currHere[0] * dsVector[0] + currHere[1] * dsVector[1])/currHereSpeed;
-                            double ambRedValue = dotProd > 0 ? dotProd*125.*ambRedMult : 0;*/
+                            double currHereSpeed = 100.*Math.sqrt(currHere[0]*currHere[0]+currHere[1]*currHere[1]);
+                            //double multiplier = 1.1*Math.max(0.5, Math.min(2.5, 0.35*(7.4-currHereSpeed)));
+                            double omega_red = 0.35;
+                            if (currHereSpeed < 6)
+                                omega_red = 1.85 - 0.25*currHereSpeed;
+
+                            //System.out.println(currHereSpeed+"\t"+multiplier);
+                            ambRedValue = ((double)(dim[0] - i)/((double)dim[0])) * omega_red * affinityProfile[k];
+                            //tmp1 = ((double)(dim[0] - i)/((double)dim[0]))*33.*2.;
+
+                            /*double dotProd = vecHere[0] * dsVector[0] + vecHere[1] * dsVector[1];
+                            if (dotProd < 0) {
+                                //double[] currHere = new double[] {currentSpeed[i][j][k][0] + currentSpeedOffset[0],
+                                //        currentSpeed[i][j][k][1] + currentSpeedOffset[1]};
+                                //double currHereSpeed = 100.*Math.sqrt(currHere[0]*currHere[0]+currHere[1]*currHere[1]);
+                                multiplier = 1.1*Math.max(0.5, Math.min(2.5, 0.35*(7.4-currHereSpeed)));
+                                tmp2 = multiplier*ambRedMult*(33.)*2.;
+                                //System.out.println(currHereSpeed+"\t"+multiplier);
+                                ambRedValue2 = -dotProd * ambRedMult * multiplier * affinityProfile[k] * dxy;
+                            }*/
+
 
                             for (int ii = 0; ii < ambientValHere.length; ii++)
                                 ambientValHere[ii] -= ambRedValue;

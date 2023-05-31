@@ -3,6 +3,7 @@ package save;
 import ucar.ma2.Array;
 import ucar.ma2.ArrayDouble;
 import ucar.ma2.DataType;
+import ucar.ma2.InvalidRangeException;
 import ucar.nc2.Attribute;
 import ucar.nc2.Dimension;
 import ucar.nc2.NetcdfFileWriteable;
@@ -19,6 +20,7 @@ public class SaveNetCDF {
     public static NetcdfFileWriteable initializeFile(String f, int[] cageDims, double dxy, double dz) {
         return initializeFile(f, cageDims, dxy, dz, null);
     }
+
 
     public static NetcdfFileWriteable initializeFile(String f, int[] cageDims, double dxy, double dz, String timeUnits) {
         try {
@@ -37,6 +39,8 @@ public class SaveNetCDF {
             return null;
         }
     }
+
+
 
     public static NetcdfFileWriteable initializeFishDataFile(String f, int fishCount) {
         try {
@@ -365,4 +369,6 @@ public class SaveNetCDF {
             ex.printStackTrace();
         }
     }
+
+
 }
