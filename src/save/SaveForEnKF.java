@@ -41,6 +41,9 @@ public class SaveForEnKF {
             ncfile.setRedefineMode(true);
             createTimeVariable(ncfile, timeUnits);
             createEnKFVariable(ncfile, "X", "time", "yc", "xc");
+            createEnKFVariable(ncfile, "X_a", "time", "yc", "xc");
+            createEnKFVariable(ncfile, "X_twin", "time", "xc");
+            createEnKFVariable(ncfile, "M", "time", "xc", "zc");
             ncfile.setRedefineMode(false);
 
             return ncfile;
@@ -77,22 +80,34 @@ public class SaveForEnKF {
 
     }
 
+    public static void save1DVariable(NetcdfFileWriteable ncfile, String name, int tIndex, double[] value, Dimension dim) throws InvalidRangeException, IOException {
+
+        ArrayDouble.D2 varData = new ArrayDouble.D2(1, dim.getLength());
+
+        for (int i1=0; i1<dim.getLength(); i1++)
+            varData.set(0, i1, value[i1]);
+
+        ncfile.write(name,  new int[] {tIndex, 0}, varData);
+    }
+
     public static void save2DVariable(NetcdfFileWriteable ncfile, String name, int tIndex, double[][] value, Dimension... dims) throws InvalidRangeException, IOException {
 
         ArrayDouble.D3 varData = new ArrayDouble.D3(1, dims[0].getLength(), dims[1].getLength());
 
-        for (int xi=0; xi<dims[0].getLength(); xi++)
-            for (int yi=0; yi<dims[1].getLength(); yi++)
-                varData.set(0, xi, yi, value[xi][yi]);
+        for (int i1=0; i1<dims[0].getLength(); i1++)
+            for (int i2=0; i2<dims[1].getLength(); i2++)
+                varData.set(0, i1, i2, value[i2][i1]);
 
         ncfile.write(name,  new int[] {tIndex, 0, 0}, varData);
     }
 
-    public static void saveEnKFVariables(NetcdfFileWriteable ncfile, double time, double[][] X) {
+    public static void saveEnKFVariables(NetcdfFileWriteable ncfile, double time, double[][] X, double[][] X_a,
+                                         double[] X_twin, double[][] M) {
         try {
             Dimension tDim = ncfile.findDimension("time"),
                     xDim = ncfile.findDimension("xc"),
-                    yDim = ncfile.findDimension("yc");
+                    yDim = ncfile.findDimension("yc"),
+                    zDim = ncfile.findDimension("zc");
             Array timeData = Array.factory(DataType.DOUBLE, new int[]{1});
             timeData.setDouble(0, time);
             int[] timeOrigin = new int[]{tDim.getLength()};
@@ -101,8 +116,9 @@ public class SaveForEnKF {
             int[] dataOrigin = new int[] {tDim.getLength()-1, 0, 0, 0};
 
             save2DVariable(ncfile,  "X", tDim.getLength()-1, X, yDim, xDim);
-
-
+            save2DVariable(ncfile,  "X_a", tDim.getLength()-1, X_a, yDim, xDim);
+            save1DVariable(ncfile,  "X_twin", tDim.getLength()-1, X_twin, xDim);
+            save2DVariable(ncfile,  "M", tDim.getLength()-1, M, xDim, zDim);
         } catch (InvalidRangeException e) {
             throw new RuntimeException(e);
         } catch (IOException e) {
