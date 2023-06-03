@@ -41,4 +41,18 @@ public class MpiHandler {
         }
     }
 
+    public void distributeAnalysisFromRank0(double[][] X_a, double[][][] field, int[] dims) {
+        System.out.println("DistributeAnalysis: "+X_a.length+" x "+X_a[0].length);
+        // Send out all analysis vectors except the one for rank 0:
+        for (int i=1; i<X_a.length; i++) {
+            MPI.COMM_WORLD.Send(X_a[i], 0, X_a[i].length, MPI.DOUBLE, i, 1);
+        }
+        Util.reshapeInto3d(X_a[0], field, dims);
+    }
+
+    public void receiveAnalysisFromRank0(double[][][] field, int[] dims) {
+        double[] X_a = new double[dims[0]*dims[1]*dims[2]];
+        MPI.COMM_WORLD.Recv(X_a, 0, X_a.length, MPI.DOUBLE, 0, 1);
+        Util.reshapeInto3d(X_a, field, dims);
+    }
 }

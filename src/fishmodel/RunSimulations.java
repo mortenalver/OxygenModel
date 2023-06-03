@@ -11,6 +11,7 @@
 package fishmodel;
 
 import fishmodel.enkf.EnsembleKF;
+import fishmodel.enkf.Util;
 import fishmodel.hydraulics.SimpleTankHydraulics;
 import fishmodel.pellets.*;
 import fishmodel.enkf.MpiHandler;
@@ -53,9 +54,18 @@ public class RunSimulations {
         boolean useTwin = true; // If running EnKF, this variable is set to true if running a twin experiment
                                 // where measurements are acquired from the last (N-1) parallel model
         boolean perturbTwin = false;
+        boolean perturbThisMember = false;
+        boolean dryRun = false; // If set to true, EnKF corrections will be computed, but not applied
+        if (dryRun)
+            simNamePrefix += "_dr";
 
         int enKFInterval = 60;
-        double ambientO2Std = 0.35;
+        double locDist=17, locZMultiplier=3;
+        double ambientO2Std = 0.1, ambientO2Beta = 0.05;
+        double ambientO2_perturb = 0;
+        double currentStd = 0.02, currentBeta = 0.05;
+        double[] current_perturb = new double[2];
+
         int rank = 0, N=1;
         Random rnd = new Random();
         MpiHandler mpi = null;
@@ -66,6 +76,8 @@ public class RunSimulations {
             rank = mpi.getRank();
             N = mpi.getN();
             doMPI = true;
+            if ((rank < N-1) || !useTwin || perturbTwin)
+                perturbThisMember = true;
         } catch (Throwable ex) {
             ex.printStackTrace();
             System.out.println("Not doing MPI");
@@ -104,14 +116,14 @@ public class RunSimulations {
 
         // Simulation start time:
         int initYear = 2022, initMonth = Calendar.JUNE, initDate = 22, initHour = 0, initMin = 0, initSec = 0;
-        double t_end = 10 + 2*600; //1*24*3600;//1*24*3600; // Duration of simulation
+        double t_end = 10 + 100*60; //1*24*3600;//1*24*3600; // Duration of simulation
         int nSim = 1;//9; // Number of days to simulate (separate sims)
 
         // Common settings:
         double rad = 25;
         int startAt = 0; // Set to >0 to skip one of more simulations, but count them in the sim numbering
         double depth = 25, totDepth = 25; // Cage size (m)
-        double dxy = 2, dz = dxy; // Model resolution (m)
+        double dxy = 4, dz = dxy; // Model resolution (m)
         double dt = .5 * dxy; // Time step (s)
         int storeIntervalFeed = 600, storeIntervalInfo = 60;
         double fishMaxDepth = 20; // The maximum depth of the fish under non-feeding conditions
@@ -130,6 +142,7 @@ public class RunSimulations {
 
         int[] cageDims = new int[3];
         double[] currentOffset = new double[] {0,0,0};
+        double[] currentOffset_r = new double[] {0,0,0};
 
         // Fish setup (N, mean weight and std.dev weight):
         double nFishBjoroya = 169821; // Estimated number of individuals in experimental period (source: FishTalk data)
@@ -430,12 +443,12 @@ public class RunSimulations {
 
                     if (!useCurrentMagic) {
                         for (int j = 0; j < interpProfile1.length; j++) {
-                            /*// TEST TEST TEST: override current direction
+                            // TEST TEST TEST: override current
                             double speedHereNow = Math.sqrt(interpProfile1[j]*interpProfile1[j] + interpProfile2[j]*interpProfile2[j]);
-                            currentProfile[j][0] = 0.1317*speedHereNow;
-                            currentProfile[j][1] = 0.9913*speedHereNow;*/
-                            currentProfile[j][0] = interpProfile1[j];
-                            currentProfile[j][1] = interpProfile2[j];
+                            currentProfile[j][0] = 0;//0.1317*speedHereNow;
+                            currentProfile[j][1] = 0;//0.9913*speedHereNow;
+                            /*currentProfile[j][0] = interpProfile1[j];
+                            currentProfile[j][1] = interpProfile2[j];*/
                             currentProfile[j][2] = 0.;
                         }
                         // Update current field using the new profile:
@@ -455,8 +468,8 @@ public class RunSimulations {
                 }
 
                 // Update variable current speed offset:
-                currentOffset[0] = 0;//currentReductionFactor*currentSpeed*Math.cos(currentDirection*Math.PI/180.);
-                currentOffset[1] = 0;//currentReductionFactor*currentSpeed*Math.sin(currentDirection*Math.PI/180.);
+                currentOffset[0] = 0.05;//currentReductionFactor*currentSpeed*Math.cos(currentDirection*Math.PI/180.);
+                currentOffset[1] = 0.02;//currentReductionFactor*currentSpeed*Math.sin(currentDirection*Math.PI/180.);
 
                 diffKappaO2 = 0.2*Math.min(0.5, 10*Math.pow(currentReductionFactor*0.06,2)); // Math.min(0.5, 10*Math.pow(currentReductionFactor*0.04,2));
                 diffKappaO2Z = 5.0*0.1*Math.min(0.5, 10*Math.pow(currentReductionFactor*0.06,2)); // Math.min(0.5, 10*Math.pow(currentReductionFactor*0.04,2));
@@ -492,27 +505,37 @@ public class RunSimulations {
 
                 totFeedAdded += dt * feedingRateMult;
 
-                if (doMPI) {
+                // Perturb if we are using MPI, except if we are using a twin, and this is the twin, and the
+                // twin is not to be perturbed.
+                if (doMPI && perturbThisMember) {
+                    ambientO2_perturb = Util.updateGaussMarkov(ambientO2_perturb, ambientO2Beta, ambientO2Std, dt, rnd);
                     for (int j = 0; j < ambientValueO2.length; j++) {
-                        if (useTwin && (rank==N-1) && !perturbTwin)
-                            // Add no perturbation since this is the twin model which isn't to be perturbed:
-                            ambientValueO2_r[j] = ambientValueO2[j];
-                        else
-                            // Add white noise perturbation to ambient values:
-                            ambientValueO2_r[j] = ambientValueO2[j] + ambientO2Std*rnd.nextGaussian();
-                        }
+                        ambientValueO2_r[j] = ambientValueO2[j] + ambientO2_perturb;
+                    }
+                    for (int j = 0; j < 2; j++) {
+                        current_perturb[j] = Util.updateGaussMarkov(current_perturb[j], currentBeta, currentStd, dt, rnd);
+                        currentOffset_r[j] = currentOffset[j] + current_perturb[j];
+                    }
+                } else if (useTwin && (rank == N-1)) {
+                    // This is the twin, introduce possible model error here.
+                    for (int j = 0; j < ambientValueO2.length; j++) {
+                        ambientValueO2_r[j] = ambientValueO2[j] + 0.25;
+
+                    }
+                    System.arraycopy(currentOffset, 0, currentOffset_r, 0, currentOffset.length);
                 } else {
-                    // Copy ambientValueO2 without perturbations:
+                    // Copy ambientValueO2 and currentOffset without perturbations:
                     System.arraycopy(ambientValueO2, 0, ambientValueO2_r, 0, ambientValueO2.length);
+                    System.arraycopy(currentOffset, 0, currentOffset_r, 0, currentOffset.length);
                 }
 
                 double[] r = ap.step(dt, fc, dxy, dz, useWalls, mask, sinkingSpeed, diffKappa, diffKappaZ, 
-                        hydro, currentOffset, sourceTerm, feedingRateMult, ambientValueFeed);
+                        hydro, currentOffset_r, sourceTerm, feedingRateMult, ambientValueFeed);
                 outFlow = r[0]; // Feed lost from grid (not used)
                 outFlow_net = r[1]; // Feed lost from the unmasked part of the grid (feed lost through side)
 
                 double[] o2OutFlow = apOx.step(dt, o2, dxy, dz, useWalls, mask, 0, diffKappaO2, diffKappaO2Z,
-                        hydro, currentOffset, feedingRate, 0, ambientValueO2_r);
+                        hydro, currentOffset_r, feedingRate, 0, ambientValueO2_r);
 
 
                 if (useFishDirectionVector) {
@@ -531,7 +554,14 @@ public class RunSimulations {
                     double[][] X = mpi.gatherStateToRank0(o2);
                     if (isRoot) {
                         System.out.println("Calling EnKF");
-                        enKF.doAnalysis(t, X, useTwin);
+                        double[][] X_a = enKF.doAnalysis(t, X, useTwin, locDist/dxy, locZMultiplier);
+                        if (!dryRun) {
+                            mpi.distributeAnalysisFromRank0(X_a, o2, cageDims);
+                        }
+                    } else if (!dryRun) {
+                        if (!useTwin || (rank < N-1)) {
+                            mpi.receiveAnalysisFromRank0(o2, cageDims);
+                        }
                     }
                 }
 

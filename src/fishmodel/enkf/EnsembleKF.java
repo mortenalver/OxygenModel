@@ -15,22 +15,26 @@ public class EnsembleKF {
     boolean first = true;
     String filePrefix;
     NetcdfFileWriteable enKFFile = null;
+    private int[] cageDims;
     Measurements.MeasurementSet measSet = null;
     DMatrixRMaj M = null;
     public EnsembleKF(String filePrefix, int[] cageDims, Measurements.MeasurementSet measSet) {
         this.filePrefix = filePrefix;
+        this.cageDims = cageDims;
         this.measSet = measSet;
         M = Measurements.getMeasurementModel(cageDims, measSet);
     }
 
-    public void doAnalysis(double t, double[][] dX, boolean useTwin) {
+    public double[][] doAnalysis(double t, double[][] dX, boolean useTwin,
+                                 double locDist, double locZMultiplier) {
 
         int N = (useTwin ? dX.length-1: dX.length); // Set correct N corresponding to the ensemble X.
         System.out.println("N = "+N);
         String file = filePrefix+"_ens.nc";
         if (first) {
             first = false;
-            enKFFile = SaveForEnKF.initializeEnKFFile(file, dX[0].length, N, 1, "seconds");
+            enKFFile = SaveForEnKF.initializeEnKFFile(file, dX[0].length, N, M.getNumRows(), "seconds",
+                    cageDims);
 
         } else {
             enKFFile = SaveForEnKF.openFile(file);
@@ -72,7 +76,8 @@ public class EnsembleKF {
 
         double N_d = (double)N;
         double N_1 = Math.max((double)N-1., 1.);
-        // TODO: Localization
+        int numel = cageDims[0]*cageDims[1]*cageDims[2]; // The number of cells in the field. May be lower than the
+                // number of elements in the state vector, if parameters are being estimated.
 
         // Set up R matrix:
         double[] rval = new double[M.getNumRows()];
@@ -113,10 +118,11 @@ public class EnsembleKF {
         //System.out.println("Dev exact:");
         //System.out.println(dev_exact);
 
-        // TODO: localization
+        DMatrixRMaj Kloc1 = getLocalizationMatrix(cageDims, M, numel, locDist, locZMultiplier);
 
         // Calculate Kalman gain:
-        DMatrixRMaj K = CommonOps_DDRM.mult(CommonOps_DDRM.mult(theta, CommonOps_DDRM.transpose(omega, null), null), phi_inv, null);
+        DMatrixRMaj K = CommonOps_DDRM.elementMult(Kloc1, CommonOps_DDRM.mult(CommonOps_DDRM.mult(theta, CommonOps_DDRM.transpose(omega,
+                null), null), phi_inv, null), null);
         CommonOps_DDRM.scale(1./N_1, K);
 
         DMatrixRMaj corrections = CommonOps_DDRM.mult(K, deviations, null);
@@ -128,7 +134,9 @@ public class EnsembleKF {
 
 
         // Save ensemble state:
-        SaveForEnKF.saveEnKFVariables(enKFFile, t, m2A(X), m2A(X_a), m2A_1d(X_twin), m2A(M));
+        System.out.println("M: "+M.getNumRows()+"x"+M.getNumCols());
+        SaveForEnKF.saveEnKFVariables(enKFFile, t, m2A(X), m2A(X_a), m2A_1d(X_twin), m2A(M),
+                m2A(deviations), m2A(dev_exact), m2A(K));
 
 
         try {
@@ -136,6 +144,52 @@ public class EnsembleKF {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+
+        return m2A_transpose(X_a);
+    }
+
+    public DMatrixRMaj getLocalizationMatrix(int[] dims, DMatrixRMaj M, int numel, double locDist, double locZMultiplier) {
+        DMatrixRMaj Xloc1 = new DMatrixRMaj(M.getNumCols(), M.getNumRows());
+
+        for (int i=0; i<M.getNumRows(); i++) { // Loop over measurements
+            // Find index of this measurement:
+            int mInd = 0;
+            while (M.get(i, mInd) == 0)
+                mInd = mInd + 1;
+            double[] mCoord = Util.getStateCoords(mInd, dims);
+
+            // Set values for Xloc1:
+            for (int j = 0; j < M.getNumCols(); j++) { // Loop over state variables
+                if (j < numel) {
+                    double[] sCoord = Util.getStateCoords(j, dims);
+                    double distance = Math.sqrt(Math.pow(mCoord[0] - sCoord[0], 2) + Math.pow(mCoord[1] - sCoord[1], 2) +
+                            Math.pow(locZMultiplier * (mCoord[2] - sCoord[2]), 2));
+                    Xloc1.set(j, i, localizationValue(distance, locDist));
+                } else {
+                    // No localization for parameter values:
+                    Xloc1.set(j, i, 1.);
+                }
+            }
+        }
+        return Xloc1;
+    }
+
+    private double localizationValue(double dist, double locDist) {
+        // Localization function used in Daniel's EnKF:
+        double lval;
+        double c = Math.sqrt(10./3.)*locDist;
+        double frac = dist/c;
+        if (dist<c) {
+            lval = -0.25 * Math.pow(frac, 5.) + 0.5 * Math.pow(frac, 4.) + (5. / 8.) * Math.pow(frac, 3.) - (5. / 3.) * Math.pow(frac, 2.) + 1.;
+        }
+        else if (dist <2 * c) {
+            lval = (1. / 12.) * Math.pow(frac, 5.) - 0.5 * Math.pow(frac, 4.) + (5. / 8.) * Math.pow(frac, 3.) + (5. / 3.) * Math.pow(frac, 2.) -
+                5. * frac + 4. - (2. / 3.) / frac;
+        }
+        else
+            lval = 0.;
+
+        return lval;
     }
 
     public double[][] m2A(DMatrixRMaj matrix) {
@@ -143,6 +197,16 @@ public class EnsembleKF {
         for (int r = 0; r < array.length; r++) {
             for (int c = 0; c < array[r].length; c++) {
                 array[r][c] = matrix.get(r, c);
+            }
+        }
+        return array;
+    }
+
+    public double[][] m2A_transpose(DMatrixRMaj matrix) {
+        double[][] array = new double[matrix.getNumCols()][matrix.getNumRows()];
+        for (int r = 0; r < array.length; r++) {
+            for (int c = 0; c < array[r].length; c++) {
+                array[r][c] = matrix.get(c, r);
             }
         }
         return array;

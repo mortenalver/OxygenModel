@@ -1,9 +1,6 @@
 package save;
 
-import ucar.ma2.Array;
-import ucar.ma2.ArrayDouble;
-import ucar.ma2.DataType;
-import ucar.ma2.InvalidRangeException;
+import ucar.ma2.*;
 import ucar.nc2.Attribute;
 import ucar.nc2.Dimension;
 import ucar.nc2.NetcdfFileWriteable;
@@ -28,7 +25,8 @@ public class SaveForEnKF {
             var.addAttribute(new Attribute("units", "seconds since 2000-01-01 00:00:00"));
     }
 
-    public static NetcdfFileWriteable initializeEnKFFile(String f, int nStates, int N, int m, String timeUnits) {
+    public static NetcdfFileWriteable initializeEnKFFile(String f, int nStates, int N, int m, String timeUnits,
+                                                         int[] cageDims) {
         try {
             NetcdfFileWriteable ncfile = NetcdfFileWriteable.createNew(f);
             createTimeDimension(ncfile);
@@ -42,8 +40,19 @@ public class SaveForEnKF {
             createTimeVariable(ncfile, timeUnits);
             createEnKFVariable(ncfile, "X", "time", "yc", "xc");
             createEnKFVariable(ncfile, "X_a", "time", "yc", "xc");
-            createEnKFVariable(ncfile, "X_twin", "time", "xc");
+            createEnKFVariable(ncfile, "X_t", "time", "xc");
             createEnKFVariable(ncfile, "M", "time", "xc", "zc");
+            createEnKFVariable(ncfile, "deviation", "time", "yc", "zc");
+            createEnKFVariable(ncfile, "deviation_exact", "time", "yc", "zc");
+            createEnKFVariable(ncfile, "K", "time", "zc", "xc");
+
+            ArrayInt cdA = new ArrayInt(new int[] {cageDims.length});
+            for (int i = 0; i < cageDims.length; i++) {
+                cdA.setInt(i, cageDims[i]);
+            }
+
+            ncfile.addGlobalAttribute("cageDims", cdA);
+
             ncfile.setRedefineMode(false);
 
             return ncfile;
@@ -102,7 +111,8 @@ public class SaveForEnKF {
     }
 
     public static void saveEnKFVariables(NetcdfFileWriteable ncfile, double time, double[][] X, double[][] X_a,
-                                         double[] X_twin, double[][] M) {
+                                         double[] X_twin, double[][] M, double[][] dev, double[][] dev_exact,
+                                         double[][] K) {
         try {
             Dimension tDim = ncfile.findDimension("time"),
                     xDim = ncfile.findDimension("xc"),
@@ -117,8 +127,16 @@ public class SaveForEnKF {
 
             save2DVariable(ncfile,  "X", tDim.getLength()-1, X, yDim, xDim);
             save2DVariable(ncfile,  "X_a", tDim.getLength()-1, X_a, yDim, xDim);
-            save1DVariable(ncfile,  "X_twin", tDim.getLength()-1, X_twin, xDim);
+            save1DVariable(ncfile,  "X_t", tDim.getLength()-1, X_twin, xDim);
+
             save2DVariable(ncfile,  "M", tDim.getLength()-1, M, xDim, zDim);
+            save2DVariable(ncfile,  "deviation", tDim.getLength()-1, dev, yDim, zDim);
+            save2DVariable(ncfile,  "deviation_exact", tDim.getLength()-1, dev_exact, yDim, zDim);
+            //System.out.println("K double: "+K.length+" by "+K[0].length);
+            //System.out.println("xdim: "+xDim.getLength());
+            //System.out.println("zdim: "+zDim.getLength());
+            save2DVariable(ncfile,  "K", tDim.getLength()-1, K, zDim, xDim);
+
         } catch (InvalidRangeException e) {
             throw new RuntimeException(e);
         } catch (IOException e) {
