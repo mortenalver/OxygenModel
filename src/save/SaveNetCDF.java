@@ -367,6 +367,7 @@ public class SaveNetCDF {
             }
         } catch (Exception ex) {
             ex.printStackTrace();
+            System.exit(0);
         }
     }
 

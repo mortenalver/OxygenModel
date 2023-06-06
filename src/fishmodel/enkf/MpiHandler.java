@@ -30,7 +30,7 @@ public class MpiHandler {
                 MPI.COMM_WORLD.Recv(vector, 0, vector.length, MPI.DOUBLE, i, 1);
                 allStates[i] = new double[vector.length];
                 System.arraycopy(vector, 0, allStates[i], 0, vector.length);
-                System.out.println("Received data from rank "+i);
+                //System.out.println("Received data from rank "+i);
             }
             return allStates;
         }
@@ -42,7 +42,7 @@ public class MpiHandler {
     }
 
     public void distributeAnalysisFromRank0(double[][] X_a, double[][][] field, int[] dims) {
-        System.out.println("DistributeAnalysis: "+X_a.length+" x "+X_a[0].length);
+        //System.out.println("DistributeAnalysis: "+X_a.length+" x "+X_a[0].length);
         // Send out all analysis vectors except the one for rank 0:
         for (int i=1; i<X_a.length; i++) {
             MPI.COMM_WORLD.Send(X_a[i], 0, X_a[i].length, MPI.DOUBLE, i, 1);

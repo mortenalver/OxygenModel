@@ -27,6 +27,7 @@ import fishmodel.sim.InputDataNetcdf;
 import org.apache.commons.math3.analysis.interpolation.LinearInterpolator;
 import org.apache.commons.math3.analysis.polynomials.PolynomialSplineFunction;
 import save.SaveNetCDF;
+import ucar.nc2.NetcdfFile;
 import ucar.nc2.NetcdfFileWriteable;
 
 
@@ -47,7 +48,7 @@ public class RunSimulations {
 
         // Save files:
         String saveDir = "./";
-        String simNamePrefix = "test2";//"highdiff2_highero2_within_dsred_2m_";
+        String simNamePrefix = "test6";//"highdiff2_highero2_within_dsred_2m_";
         String simNamePostfix = "";
 
         boolean doMPI = false; // Will be set to true if we are running is EnKF mode using MPI
@@ -123,7 +124,7 @@ public class RunSimulations {
         double rad = 25;
         int startAt = 0; // Set to >0 to skip one of more simulations, but count them in the sim numbering
         double depth = 25, totDepth = 25; // Cage size (m)
-        double dxy = 4, dz = dxy; // Model resolution (m)
+        double dxy = 2, dz = dxy; // Model resolution (m)
         double dt = .5 * dxy; // Time step (s)
         int storeIntervalFeed = 600, storeIntervalInfo = 60;
         double fishMaxDepth = 20; // The maximum depth of the fish under non-feeding conditions
@@ -273,7 +274,7 @@ public class RunSimulations {
 
         // If we are running in EnKF mode, let rank 0 initialize the EnKF class:
         if (doMPI && (rank==0)) {
-            enKF = new EnsembleKF(simNamePrefix, cageDims, ms);
+            enKF = new EnsembleKF(simNamePrefix, cageDims, dxy, ms);
         }
 
         // --------------------------------------------------------------------------
@@ -373,25 +374,12 @@ public class RunSimulations {
             SimpleDateFormat filenameForm = new SimpleDateFormat("dd_MM");
             String filePrefix = simNamePrefix+filenameForm.format(startTime);
 
+            // Establish file names to write data to:
             NetcdfFileWriteable ncfile = null;
             NetcdfFileWriteable fishfile = null;
-            if (isRoot) {
-                ncfile = SaveNetCDF.initializeFile(saveDir + filePrefix + simNamePostfix + ".nc", cageDims, 1, 1, unitString);
-                fishfile = SaveNetCDF.initializeFile(saveDir + filePrefix + simNamePostfix + "_fish.nc", new int[]{fish.getNGroups(), 1, cageDims[2]}, 1, 1, unitString);
-                SaveNetCDF.createCageVariables(ncfile, "feed", "ingDist", "o2", "o2consDist");
-                SaveNetCDF.createProfileVariable(fishfile, "appetite", 0);
-                SaveNetCDF.createProfileVariable(fishfile, "ingested", 0);
-                SaveNetCDF.createProfileVariable(fishfile, "V", 0);
-                SaveNetCDF.createScalarVariables(fishfile, "rho", "feedingRate", "o2ConsumptionRate",
-                        "min_O2", "mean_O2", "frac_hypoxia",
-                        "meanFeedDepth", "d_meanFeedDepth", "totIngRate", "totIngested", "totFeed",
-                        "waste", "waste_net");
-                SaveNetCDF.createProfileVariable(fishfile, "ext_O2", 2); // dim=2 means along z dim
-                SaveNetCDF.createProfileVariable(fishfile, "temperature", 2);
-                SaveNetCDF.createProfileVariable(fishfile, "ext_currentU", 2);
-                SaveNetCDF.createProfileVariable(fishfile, "ext_currentV", 2);
-                SaveNetCDF.createScalarVariables(fishfile, o2Names);
-            }
+            String ncfilePath = saveDir + filePrefix + simNamePostfix + ".nc";
+            String fishfilePath = saveDir + filePrefix + simNamePostfix + "_fish.nc";
+            boolean firstStore3d = true, firstStoreScalars = true;
 
             double totFeedAdded = 0;
 
@@ -554,7 +542,13 @@ public class RunSimulations {
                     double[][] X = mpi.gatherStateToRank0(o2);
                     if (isRoot) {
                         System.out.println("Calling EnKF");
+                        long tic = System.currentTimeMillis();
                         double[][] X_a = enKF.doAnalysis(t, X, useTwin, locDist/dxy, locZMultiplier);
+                        long duration = System.currentTimeMillis() - tic;
+                        if (duration > 1000L)
+                            System.out.println("Analysis took "+(duration/1000L)+" seconds.");
+                        else
+                            System.out.println("Analysis took "+duration+" ms.");
                         if (!dryRun) {
                             mpi.distributeAnalysisFromRank0(X_a, o2, cageDims);
                         }
@@ -571,14 +565,58 @@ public class RunSimulations {
                     double remaining = (elapsed / fractionCompleted) - elapsed;
                     System.out.println("t = " + nf1.format(t) + " - Estimated time to complete: " + nf1.format(remaining) + " minutes");
 
+                    if (firstStore3d) {
+                        firstStore3d = false;
+                        ncfile = SaveNetCDF.initializeFile(ncfilePath, cageDims, 1, 1, unitString);
+                        SaveNetCDF.createCageVariables(ncfile, "feed", "ingDist", "o2", "o2consDist");
+                    }
+                    else {
+                        try {
+                            ncfile = NetcdfFileWriteable.openExisting(ncfilePath);
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    }
+
                     SaveNetCDF.saveCageVariable(ncfile, t, "feed", fc, mask, true);
                     SaveNetCDF.saveCageVariable(ncfile, t, "ingDist", ingDist, mask, false);
                     SaveNetCDF.saveCageVariable(ncfile, t, "o2", o2, (maskO2WhenSaving ? mask : null), false);
                     SaveNetCDF.saveCageVariable(ncfile, t, "o2consDist", o2consDist, mask, false);
+
+                    try {
+                        ncfile.close();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+
                 }
 
                 if (isRoot && i>0 && ((t/((double)storeIntervalInfo) - Math.floor(t/(double)storeIntervalInfo)) < 1e-5)) {
                 //if ((t - Math.floor(t) < dt) && (Math.floor(t) % storeIntervalInfo == 0)) {
+
+                    if (firstStoreScalars) {
+                        firstStoreScalars = false;
+                        fishfile = SaveNetCDF.initializeFile(fishfilePath, new int[]{fish.getNGroups(), 1, cageDims[2]}, 1, 1, unitString);
+                        SaveNetCDF.createProfileVariable(fishfile, "appetite", 0);
+                        SaveNetCDF.createProfileVariable(fishfile, "ingested", 0);
+                        SaveNetCDF.createProfileVariable(fishfile, "V", 0);
+                        SaveNetCDF.createScalarVariables(fishfile, "rho", "feedingRate", "o2ConsumptionRate",
+                                "min_O2", "mean_O2", "frac_hypoxia",
+                                "meanFeedDepth", "d_meanFeedDepth", "totIngRate", "totIngested", "totFeed",
+                                "waste", "waste_net");
+                        SaveNetCDF.createProfileVariable(fishfile, "ext_O2", 2); // dim=2 means along z dim
+                        SaveNetCDF.createProfileVariable(fishfile, "temperature", 2);
+                        SaveNetCDF.createProfileVariable(fishfile, "ext_currentU", 2);
+                        SaveNetCDF.createProfileVariable(fishfile, "ext_currentV", 2);
+                        SaveNetCDF.createScalarVariables(fishfile, o2Names);
+                    }
+                    else {
+                        try {
+                            fishfile = NetcdfFileWriteable.openExisting(fishfilePath);
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    }
 
                     double[] groupArray = new double[fish.getNGroups()];
 
@@ -662,6 +700,12 @@ public class RunSimulations {
 
                     lastMeanFeedDepth = meanFeedDepth;
 
+                    try {
+                        fishfile.close();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+
                 }
 
 
@@ -677,14 +721,6 @@ public class RunSimulations {
             System.out.println("totI = " + totI);
             System.out.println("Feed wastage: " + nf.format(100 * (totFeedAdded - totI) / totFeedAdded) + " %");
 
-            if (isRoot) {
-                try {
-                    ncfile.close();
-                    fishfile.close();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-            }
         }
     }
 

@@ -26,7 +26,7 @@ public class SaveForEnKF {
     }
 
     public static NetcdfFileWriteable initializeEnKFFile(String f, int nStates, int N, int m, String timeUnits,
-                                                         int[] cageDims) {
+                                                         int[] cageDims, double dxy) {
         try {
             NetcdfFileWriteable ncfile = NetcdfFileWriteable.createNew(f);
             createTimeDimension(ncfile);
@@ -45,6 +45,7 @@ public class SaveForEnKF {
             createEnKFVariable(ncfile, "deviation", "time", "yc", "zc");
             createEnKFVariable(ncfile, "deviation_exact", "time", "yc", "zc");
             createEnKFVariable(ncfile, "K", "time", "zc", "xc");
+            createEnKFVariable(ncfile, "Xloc", "time", "zc", "xc");
 
             ArrayInt cdA = new ArrayInt(new int[] {cageDims.length});
             for (int i = 0; i < cageDims.length; i++) {
@@ -52,7 +53,7 @@ public class SaveForEnKF {
             }
 
             ncfile.addGlobalAttribute("cageDims", cdA);
-
+            ncfile.addGlobalAttribute("dxy", dxy);
             ncfile.setRedefineMode(false);
 
             return ncfile;
@@ -112,7 +113,7 @@ public class SaveForEnKF {
 
     public static void saveEnKFVariables(NetcdfFileWriteable ncfile, double time, double[][] X, double[][] X_a,
                                          double[] X_twin, double[][] M, double[][] dev, double[][] dev_exact,
-                                         double[][] K) {
+                                         double[][] K, double[][] Xloc) {
         try {
             Dimension tDim = ncfile.findDimension("time"),
                     xDim = ncfile.findDimension("xc"),
@@ -136,6 +137,7 @@ public class SaveForEnKF {
             //System.out.println("xdim: "+xDim.getLength());
             //System.out.println("zdim: "+zDim.getLength());
             save2DVariable(ncfile,  "K", tDim.getLength()-1, K, zDim, xDim);
+            save2DVariable(ncfile,  "Xloc", tDim.getLength()-1, Xloc, zDim, xDim);
 
         } catch (InvalidRangeException e) {
             throw new RuntimeException(e);
