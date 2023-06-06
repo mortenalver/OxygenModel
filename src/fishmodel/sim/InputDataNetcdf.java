@@ -16,7 +16,7 @@ public class InputDataNetcdf {
     private Long[] ltime;
     private double[] currentSpeeds, currentDirs, o2ambVal5, o2ambVal10, o2ambVal15,
             feedingVal, temperatures5, temperatures10, temperatures15;
-    private double[][] currentSpeeds2, currentDirs2;
+    private double[][] currentSpeeds2, currentDirs2, o2SensorValues;
     private double currentSpeedMod, currentDirMod;
     private double[] currentSpeedMod2=null, currentDirMod2=null, currentDepths=null;
 
@@ -45,6 +45,7 @@ public class InputDataNetcdf {
             Variable temp5 = ncfile.findVariable("temperature_5");
             Variable temp10 = ncfile.findVariable("temperature_10");
             Variable temp15 = ncfile.findVariable("temperature_15");
+            Variable o2Sensors = ncfile.findVariable("O2allSensors");
 
             // Get shape of time variable:
             int[] shape = time.getShape();
@@ -52,6 +53,9 @@ public class InputDataNetcdf {
             // Check if we have 1 series of current data, or multiple layers:
             int[] currentShape = spd.getShape();
             multipleLayers = currentShape.length > 1;
+
+            // Get shape of O2 sensor data variable:
+            int[] o2SensorDataShape = o2Sensors.getShape();
 
             ArrayDouble.D1 tdata = (ArrayDouble.D1) time.read(new int[]{0}, shape);
 
@@ -80,6 +84,7 @@ public class InputDataNetcdf {
             ArrayDouble.D1 tempdata5 = (ArrayDouble.D1) temp5.read(new int[]{0}, shape);
             ArrayDouble.D1 tempdata10 = (ArrayDouble.D1) temp10.read(new int[]{0}, shape);
             ArrayDouble.D1 tempdata15 = (ArrayDouble.D1) temp15.read(new int[]{0}, shape);
+            ArrayDouble.D2 o2SensorData = (ArrayDouble.D2) o2Sensors.read(new int[]{0, 0}, o2SensorDataShape);
             times = new Date[shape[0]];
             ltime = new Long[shape[0]];
             if (multipleLayers) {
@@ -96,6 +101,7 @@ public class InputDataNetcdf {
             temperatures5 = new double[shape[0]];
             temperatures10 = new double[shape[0]];
             temperatures15 = new double[shape[0]];
+            o2SensorValues = new double[o2SensorDataShape[0]][o2SensorDataShape[1]];
             for (int i=0; i<times.length; i++) {
                 ltime[i] = (1000*Math.round(tdata.get(i) * 86400 - 7200)); // Subtracting two hours since Java assumes GMT, but it is given in Norwegian summer time.
                 times[i] = new Date(ltime[i]);
@@ -110,6 +116,9 @@ public class InputDataNetcdf {
                 temperatures5[i] = tempdata5.get(i) + addTemperatureOffsets[0];
                 temperatures10[i] = tempdata10.get(i) + addTemperatureOffsets[1];
                 temperatures15[i] = tempdata15.get(i) + addTemperatureOffsets[2];
+
+                for (int j=0; j<o2SensorDataShape[1]; j++)
+                    o2SensorValues[i][j] = o2SensorData.get(i, j);
             }
             if (multipleLayers) {
                 for (int i=0; i<times.length; i++) {
@@ -140,7 +149,7 @@ public class InputDataNetcdf {
         System.out.println(startTime.toString());
         System.out.println();
         while (((piv++) < (ltime.length-1)) && (ltime[piv+1]<sTime));
-        System.out.println("piv = "+piv);
+        //System.out.println("piv = "+piv);
 
         computeCurrentWithNoise();
         //System.out.println(ltime[piv]);
@@ -238,5 +247,9 @@ public class InputDataNetcdf {
 
     public double getFeedingRate() {
         return feedingVal[piv];
+    }
+
+    public double[] getO2Measurements() {
+        return o2SensorValues[piv].clone();
     }
 }

@@ -51,12 +51,36 @@ public class Measurements {
         return ms;
     }
 
+    public static int[] getSensorsToAssimilateBjoroya() {
+
+        return new int[] {0, 1, 2}; // Centre only
+
+        // Copied from python code:
+        //return (0, 3, 6, 9) # All at 5 m
+        //return (1, 4, 7, 10)  # All at 10 m
+        //return (4, 7, 10)  # Ring measurements at 10 m
+        //return (0, 1, 2, 4, 7, 10)  # All at 10 m and all in centre
+        //return (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11) # All sensors
+    }
 
     public static DMatrixRMaj getMeasurementModel(int[] cageDims, MeasurementSet ms) {
         int n = cageDims[0]*cageDims[1]*cageDims[2];
         DMatrixRMaj M = new DMatrixRMaj(ms.names.length, n);
         for (int i=0; i<ms.names.length; i++) {
             int stateNum = Util.getStateIndex(ms.pos[i][0], ms.pos[i][1], ms.pos[i][2], cageDims);
+            //System.out.println("meas "+i+": state "+stateNum);
+            M.set(i, stateNum, 1);
+        }
+        return M;
+    }
+
+    public static DMatrixRMaj getMeasurementModelBjoroya(int[] cageDims, MeasurementSet ms) {
+        int[] activeSensors = getSensorsToAssimilateBjoroya();
+        int n = cageDims[0]*cageDims[1]*cageDims[2];
+        DMatrixRMaj M = new DMatrixRMaj(activeSensors.length, n);
+        for (int i=0; i<activeSensors.length; i++) {
+            int stateNum = Util.getStateIndex(ms.pos[activeSensors[i]][0],
+                    ms.pos[activeSensors[i]][1], ms.pos[activeSensors[i]][2], cageDims);
             //System.out.println("meas "+i+": state "+stateNum);
             M.set(i, stateNum, 1);
         }

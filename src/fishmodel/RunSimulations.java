@@ -48,11 +48,11 @@ public class RunSimulations {
 
         // Save files:
         String saveDir = "./";
-        String simNamePrefix = "test6";//"highdiff2_highero2_within_dsred_2m_";
+        String simNamePrefix = "test7";//"highdiff2_highero2_within_dsred_2m_";
         String simNamePostfix = "";
 
         boolean doMPI = false; // Will be set to true if we are running is EnKF mode using MPI
-        boolean useTwin = true; // If running EnKF, this variable is set to true if running a twin experiment
+        boolean useTwin = false; // If running EnKF, this variable is set to true if running a twin experiment
                                 // where measurements are acquired from the last (N-1) parallel model
         boolean perturbTwin = false;
         boolean perturbThisMember = false;
@@ -377,8 +377,8 @@ public class RunSimulations {
             // Establish file names to write data to:
             NetcdfFileWriteable ncfile = null;
             NetcdfFileWriteable fishfile = null;
-            String ncfilePath = saveDir + filePrefix + simNamePostfix + ".nc";
-            String fishfilePath = saveDir + filePrefix + simNamePostfix + "_fish.nc";
+            String ncfilePath = saveDir + filePrefix + simNamePostfix + "_"+String.format("%02d", rank)+".nc";
+            String fishfilePath = saveDir + filePrefix + simNamePostfix + "_"+String.format("%02d", rank)+"_fish.nc";
             boolean firstStore3d = true, firstStoreScalars = true;
 
             double totFeedAdded = 0;
@@ -397,7 +397,6 @@ public class RunSimulations {
                 double tMin = t / 60;
 
                 if (inData.advance(t) || (i==0)) {
-                    //System.out.println("Updating environment: t = "+t);
 
                     double[] tempVal = {inData.getTemperature5(), inData.getTemperature10(), inData.getTemperature15()};
                     //tempVal[0] = 18; tempVal[1] = 10; tempVal[2] = 2;
@@ -543,7 +542,7 @@ public class RunSimulations {
                     if (isRoot) {
                         System.out.println("Calling EnKF");
                         long tic = System.currentTimeMillis();
-                        double[][] X_a = enKF.doAnalysis(t, X, useTwin, locDist/dxy, locZMultiplier);
+                        double[][] X_a = enKF.doAnalysis(t, X, useTwin, locDist/dxy, locZMultiplier, inData);
                         long duration = System.currentTimeMillis() - tic;
                         if (duration > 1000L)
                             System.out.println("Analysis took "+(duration/1000L)+" seconds.");
@@ -559,7 +558,7 @@ public class RunSimulations {
                     }
                 }
 
-                if (isRoot && i>0 && ((t/((double)storeIntervalFeed) - Math.floor(t/(double)storeIntervalFeed)) < 1e-5)) {
+                if (i>0 && ((t/((double)storeIntervalFeed) - Math.floor(t/(double)storeIntervalFeed)) < 1e-5)) {
                     double elapsed = (double) ((System.currentTimeMillis() - stime)) / 60000.;
                     double fractionCompleted = ((double) i) / ((double) n_steps);
                     double remaining = (elapsed / fractionCompleted) - elapsed;
@@ -591,7 +590,7 @@ public class RunSimulations {
 
                 }
 
-                if (isRoot && i>0 && ((t/((double)storeIntervalInfo) - Math.floor(t/(double)storeIntervalInfo)) < 1e-5)) {
+                if (i>0 && ((t/((double)storeIntervalInfo) - Math.floor(t/(double)storeIntervalInfo)) < 1e-5)) {
                 //if ((t - Math.floor(t) < dt) && (Math.floor(t) % storeIntervalInfo == 0)) {
 
                     if (firstStoreScalars) {

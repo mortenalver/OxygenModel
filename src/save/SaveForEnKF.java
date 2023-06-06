@@ -128,7 +128,8 @@ public class SaveForEnKF {
 
             save2DVariable(ncfile,  "X", tDim.getLength()-1, X, yDim, xDim);
             save2DVariable(ncfile,  "X_a", tDim.getLength()-1, X_a, yDim, xDim);
-            save1DVariable(ncfile,  "X_t", tDim.getLength()-1, X_twin, xDim);
+            if (X_twin != null)
+                save1DVariable(ncfile,  "X_t", tDim.getLength()-1, X_twin, xDim);
 
             save2DVariable(ncfile,  "M", tDim.getLength()-1, M, xDim, zDim);
             save2DVariable(ncfile,  "deviation", tDim.getLength()-1, dev, yDim, zDim);

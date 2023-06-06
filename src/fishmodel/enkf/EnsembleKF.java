@@ -1,6 +1,7 @@
 package fishmodel.enkf;
 
 import fishmodel.Measurements;
+import fishmodel.sim.InputDataNetcdf;
 import org.ejml.data.DMatrixRMaj;
 import org.ejml.dense.row.CommonOps_DDRM;
 import save.SaveForEnKF;
@@ -26,11 +27,11 @@ public class EnsembleKF {
         this.cageDims = cageDims;
         this.dxy = dxy;
         this.measSet = measSet;
-        M = Measurements.getMeasurementModel(cageDims, measSet);
+        M = Measurements.getMeasurementModelBjoroya(cageDims, measSet);
     }
 
     public double[][] doAnalysis(double t, double[][] dX, boolean useTwin,
-                                 double locDist, double locZMultiplier) {
+                                 double locDist, double locZMultiplier, InputDataNetcdf inData) {
 
         int N = (useTwin ? dX.length-1: dX.length); // Set correct N corresponding to the ensemble X.
         //System.out.println("N = "+N);
@@ -58,6 +59,7 @@ public class EnsembleKF {
         // by the measurement model provided by the measurements module.
         // If "useTwin" is False, we are using measurements loaded from file by the simInputsNetcdf module.
         DMatrixRMaj D=null, D_exact=null;
+
         if (useTwin) {
             // Extract the first N-1 members as the ensemble, and the last as the twin:
             DMatrixRMaj X_ens = new DMatrixRMaj(X.getNumRows(),X.getNumCols()-1);
@@ -67,7 +69,27 @@ public class EnsembleKF {
             X = X_ens; // X now consists of the non-twin members
             // Get measurements from the twin:
             DMatrixRMaj d = CommonOps_DDRM.mult(M, X_twin, null);
-            //System.out.println("Measurement:"); System.out.println(d);
+            // Set up matrix with perturbed measurements for all ensemble members:
+            DMatrixRMaj e_n = new DMatrixRMaj(1, X.getNumCols());
+            e_n.fill(1.0);
+            D = CommonOps_DDRM.mult(d, e_n, null);
+            D_exact = D.copy(); // Store the unperturbed measurement matrix
+            for (int i=0; i<D.getNumRows(); i++)
+                for (int j=0; j<D.getNumCols(); j++)
+                    D.add(i,j, measSet.std*rand.nextGaussian()); // Add gaussian noise according to measurement uncertainty
+            System.out.println("D:"); System.out.println(D);
+
+        }
+        else {
+            // Keep the entire X matrix, and let X_twin stay null. Get measurements from the input data object:
+            double[] meas = inData.getO2Measurements();
+            // Get a list of which sensors to use for assimilation:
+            int[] activeSensors = Measurements.getSensorsToAssimilateBjoroya();
+
+            DMatrixRMaj d = new DMatrixRMaj(activeSensors.length, 1);
+            for (int i = 0; i < activeSensors.length; i++) {
+                d.set(i, 0, meas[activeSensors[i]]);
+            }
             // Set up matrix with perturbed measurements for all ensemble members:
             DMatrixRMaj e_n = new DMatrixRMaj(1, X.getNumCols());
             e_n.fill(1.0);
@@ -77,9 +99,6 @@ public class EnsembleKF {
                 for (int j=0; j<D.getNumCols(); j++)
                     D.add(i,j, measSet.std*rand.nextGaussian()); // Add gaussian noise according to measurement uncertainty
             //System.out.println("D:"); System.out.println(D);
-
-        } {
-            // TODO: handle non-twin case
         }
 
 
@@ -109,7 +128,8 @@ public class EnsembleKF {
 
         // Compute intermediary matrixes:
         DMatrixRMaj MX = CommonOps_DDRM.mult(M, X, null);
-        //System.out.println("MX: "+MX.getNumRows()+"x"+MX.getNumCols());
+        System.out.println("M: "+M.getNumRows()+"x"+M.getNumCols());
+        System.out.println("MX: "+MX.getNumRows()+"x"+MX.getNumCols());
         DMatrixRMaj omega = CommonOps_DDRM.mult(M, theta, null);
         //System.out.println("omega: "+omega.getNumRows()+"x"+omega.getNumCols());
 
@@ -120,6 +140,7 @@ public class EnsembleKF {
         CommonOps_DDRM.invert(phi_inv);
         //System.out.println("phi_inv: "+phi_inv.getNumRows()+"x"+phi_inv.getNumCols());
 
+        System.out.println("D: "+D.getNumRows()+"x"+D.getNumCols());
         DMatrixRMaj deviations = CommonOps_DDRM.subtract(D, MX, null);
         DMatrixRMaj dev_exact = CommonOps_DDRM.subtract(D_exact, MX, null);
         //System.out.println("Deviations:");
@@ -144,7 +165,8 @@ public class EnsembleKF {
 
         // Save ensemble state:
         if (savingThisStep) {
-            SaveForEnKF.saveEnKFVariables(enKFFile, t, m2A(X), m2A(X_a), m2A_1d(X_twin), m2A(M),
+            SaveForEnKF.saveEnKFVariables(enKFFile, t, m2A(X), m2A(X_a),
+                    (X_twin != null ? m2A_1d(X_twin) : null), m2A(M),
                     m2A(deviations), m2A(dev_exact), m2A(K), m2A(Kloc1));
             try {
                 enKFFile.close();
