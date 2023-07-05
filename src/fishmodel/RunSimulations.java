@@ -71,7 +71,7 @@ public class RunSimulations {
             ex.printStackTrace();
             System.out.println("Not doing MPI");
         }
-        boolean isRoot = rank==0;
+        boolean isRoot = (rank==0); // For convenience, isRoot tells us if this is the rank 0 process.
 
         // Simulation settings:
         boolean maskO2WhenSaving = false;
@@ -86,10 +86,8 @@ public class RunSimulations {
             cmf = new CurrentMagicFields("C:/Users/alver/OneDrive - NTNU/prosjekt/O2_Bjørøya/currentmagic/currents_bjoroya_2m.nc");
         }
 
-        boolean useVerticalDist = true;
-
-        boolean useFishDirectionVector = false;
-        double[] fishDirectionVector = new double[] {0.91, 0.41};
+        boolean useVerticalDist = true; // Use non-uniform vertical distribution (defined further down)
+                                        // for non-feeding fish
 
         boolean useInstantaneousAmbientVals = true; // true to use ambient value time series, false to use daily averages
 
@@ -536,11 +534,6 @@ public class RunSimulations {
                 double[] o2OutFlow = apOx.step(dt, o2, dxy, dz, useWalls, mask, 0, diffKappaO2, diffKappaO2Z,
                         hydro, currentOffset_r, feedingRate, 0, ambientValueO2_r);
 
-
-                if (useFishDirectionVector) {
-                    o2AffSum = setO2AffinityWithVerticalProfileAndDirection(cageDims, dz, fishMaxDepth, fishDirectionVector, mask, affinityProfile, affinity, o2Affinity);
-                    useFishDirectionVector = false; // TEST TEST TEST
-                }
 
 
                 double[] res = IngestionAndO2Tempprofile.calculateIngestion(dt, fc, o2, affinity, o2Affinity, o2AffSum,
