@@ -17,7 +17,7 @@ public class Measurements {
 
     public static MeasurementSet setupSensorPositionsBjoroya(int[] cageDims, double dxy, double dz, double rad) {
         MeasurementSet ms = new MeasurementSet();
-        ms.std = 0.025;
+        ms.std = 5.*0.025;
 
         ms.names = new String[] {"C_5", "C_10", "C_15", "M1_5", "M1_10", "M1_15", "M2_5", "M2_10", "M2_15",
                 "M3_5", "M3_10", "M3_15"};
@@ -53,14 +53,16 @@ public class Measurements {
 
     public static int[] getSensorsToAssimilateBjoroya() {
 
-        return new int[] {0, 1, 2}; // Centre only
+        //return new int[] {0, 1, 2}; // Centre only
+        //return new int[] {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}; // All sensors
+        return new int [] {0, 1, 2, 4, 7, 10};  // All at 10 m and all in centre
 
         // Copied from python code:
         //return (0, 3, 6, 9) # All at 5 m
         //return (1, 4, 7, 10)  # All at 10 m
         //return (4, 7, 10)  # Ring measurements at 10 m
-        //return (0, 1, 2, 4, 7, 10)  # All at 10 m and all in centre
-        //return (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11) # All sensors
+
+
     }
 
     public static DMatrixRMaj getMeasurementModel(int[] cageDims, MeasurementSet ms) {
@@ -74,10 +76,10 @@ public class Measurements {
         return M;
     }
 
-    public static DMatrixRMaj getMeasurementModelBjoroya(int[] cageDims, MeasurementSet ms) {
+    public static DMatrixRMaj getMeasurementModelBjoroya(int[] cageDims, int nPar, MeasurementSet ms) {
         int[] activeSensors = getSensorsToAssimilateBjoroya();
         int n = cageDims[0]*cageDims[1]*cageDims[2];
-        DMatrixRMaj M = new DMatrixRMaj(activeSensors.length, n);
+        DMatrixRMaj M = new DMatrixRMaj(activeSensors.length, n + nPar);
         for (int i=0; i<activeSensors.length; i++) {
             int stateNum = Util.getStateIndex(ms.pos[activeSensors[i]][0],
                     ms.pos[activeSensors[i]][1], ms.pos[activeSensors[i]][2], cageDims);

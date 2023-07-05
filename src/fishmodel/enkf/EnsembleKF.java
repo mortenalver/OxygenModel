@@ -22,12 +22,12 @@ public class EnsembleKF {
     DMatrixRMaj M = null;
     int callCount = 0;
     final int saveInterval = 10; // Number of calls between each time we save data to file
-    public EnsembleKF(String filePrefix, int[] cageDims, double dxy, Measurements.MeasurementSet measSet) {
+    public EnsembleKF(String filePrefix, int[] cageDims, int nPar, double dxy, Measurements.MeasurementSet measSet) {
         this.filePrefix = filePrefix;
         this.cageDims = cageDims;
         this.dxy = dxy;
         this.measSet = measSet;
-        M = Measurements.getMeasurementModelBjoroya(cageDims, measSet);
+        M = Measurements.getMeasurementModelBjoroya(cageDims, nPar, measSet);
     }
 
     public double[][] doAnalysis(double t, double[][] dX, boolean useTwin,
@@ -77,7 +77,7 @@ public class EnsembleKF {
             for (int i=0; i<D.getNumRows(); i++)
                 for (int j=0; j<D.getNumCols(); j++)
                     D.add(i,j, measSet.std*rand.nextGaussian()); // Add gaussian noise according to measurement uncertainty
-            System.out.println("D:"); System.out.println(D);
+            //System.out.println("D:"); System.out.println(D);
 
         }
         else {
@@ -128,8 +128,8 @@ public class EnsembleKF {
 
         // Compute intermediary matrixes:
         DMatrixRMaj MX = CommonOps_DDRM.mult(M, X, null);
-        System.out.println("M: "+M.getNumRows()+"x"+M.getNumCols());
-        System.out.println("MX: "+MX.getNumRows()+"x"+MX.getNumCols());
+        //System.out.println("M: "+M.getNumRows()+"x"+M.getNumCols());
+        //System.out.println("MX: "+MX.getNumRows()+"x"+MX.getNumCols());
         DMatrixRMaj omega = CommonOps_DDRM.mult(M, theta, null);
         //System.out.println("omega: "+omega.getNumRows()+"x"+omega.getNumCols());
 

@@ -10,6 +10,7 @@
  */
 package fishmodel;
 
+import fishmodel.enkf.AssimSettings;
 import fishmodel.enkf.EnsembleKF;
 import fishmodel.enkf.Util;
 import fishmodel.hydraulics.SimpleTankHydraulics;
@@ -27,7 +28,6 @@ import fishmodel.sim.InputDataNetcdf;
 import org.apache.commons.math3.analysis.interpolation.LinearInterpolator;
 import org.apache.commons.math3.analysis.polynomials.PolynomialSplineFunction;
 import save.SaveNetCDF;
-import ucar.nc2.NetcdfFile;
 import ucar.nc2.NetcdfFileWriteable;
 
 
@@ -48,27 +48,15 @@ public class RunSimulations {
 
         // Save files:
         String saveDir = "./";
-        String simNamePrefix = "test7";//"highdiff2_highero2_within_dsred_2m_";
+        String simNamePrefix = "V_currfac";//"highdiff2_highero2_within_dsred_2m_";
         String simNamePostfix = "";
 
         boolean doMPI = false; // Will be set to true if we are running is EnKF mode using MPI
-        boolean useTwin = false; // If running EnKF, this variable is set to true if running a twin experiment
-                                // where measurements are acquired from the last (N-1) parallel model
-        boolean perturbTwin = false;
-        boolean perturbThisMember = false;
-        boolean dryRun = false; // If set to true, EnKF corrections will be computed, but not applied
-        if (dryRun)
+        AssimSettings as = new AssimSettings(); // Setting related to the EnKF are gathered in AssimSettings
+        if (as.dryRun)
             simNamePrefix += "_dr";
 
-        int enKFInterval = 60;
-        double locDist=17, locZMultiplier=3;
-        double ambientO2Std = 0.1, ambientO2Beta = 0.05;
-        double ambientO2_perturb = 0;
-        double currentStd = 0.02, currentBeta = 0.05;
-        double[] current_perturb = new double[2];
-
         int rank = 0, N=1;
-        Random rnd = new Random();
         MpiHandler mpi = null;
         EnsembleKF enKF = null;
         try {
@@ -77,25 +65,17 @@ public class RunSimulations {
             rank = mpi.getRank();
             N = mpi.getN();
             doMPI = true;
-            if ((rank < N-1) || !useTwin || perturbTwin)
-                perturbThisMember = true;
+            if ((rank < N-1) || !as.useTwin || as.perturbTwin)
+                as.perturbThisMember = true;
         } catch (Throwable ex) {
             ex.printStackTrace();
             System.out.println("Not doing MPI");
         }
         boolean isRoot = rank==0;
 
-        NumberFormat nf1 = NumberFormat.getNumberInstance(Locale.ENGLISH);
-        nf1.setMaximumFractionDigits(1);
-        nf1.setMinimumFractionDigits(0);
-
-
-
-        boolean[][][] mask = null;
-        double lastMeanFeedDepth = -1;
+        // Simulation settings:
         boolean maskO2WhenSaving = false;
-
-        boolean varyAmbient = true; // Reduction in ambient values towards the rest of the farm
+        boolean varyAmbient = false; // Reduction in ambient values towards the rest of the farm
         //double addRedMult = 0.65*0.015; // Scale factor for reduction in ambient values
 
         boolean decreasingCurrentFactor = false;
@@ -117,8 +97,8 @@ public class RunSimulations {
 
         // Simulation start time:
         int initYear = 2022, initMonth = Calendar.JUNE, initDate = 22, initHour = 0, initMin = 0, initSec = 0;
-        double t_end = 10 + 100*60; //1*24*3600;//1*24*3600; // Duration of simulation
-        int nSim = 1;//9; // Number of days to simulate (separate sims)
+        double t_end = 1*24*3600;//1*24*3600; // Duration of simulation
+        int nSim = 9; // Number of days to simulate (separate sims)
 
         // Common settings:
         double rad = 25;
@@ -137,13 +117,12 @@ public class RunSimulations {
         //double T_w = 16; double avO2 = 8*0.9612; // mg / l
         //double T_w = 12; double avO2 = 8*1.0418; // mg / l
 
-        // Oxygen diffusion constant. To be set dependent on current speed.
+        // Oxygen diffusion constant (values updated further down)
         double diffKappaO2 = 0.1, diffKappaO2Z = 0.1;
 
-
         int[] cageDims = new int[3];
-        double[] currentOffset = new double[] {0,0,0};
-        double[] currentOffset_r = new double[] {0,0,0};
+        double[] currentOffset = new double[] {0,0,0}; // Global current vector
+        double[] currentOffset_r = new double[] {0,0,0}; // Perturbed global current vector
 
         // Fish setup (N, mean weight and std.dev weight):
         double nFishBjoroya = 169821; // Estimated number of individuals in experimental period (source: FishTalk data)
@@ -168,9 +147,11 @@ public class RunSimulations {
 
         // Set up cage dimensions and cage grid:
         double modelDim = 2*(rad+4*dxy);
+        //double modelDim = 2*(rad+2.5*rad); // TEST TEST TEST extra padding
         cageDims[0] = (int)Math.ceil(modelDim/dxy);
         cageDims[1] = cageDims[0];
         cageDims[2] = (int)Math.ceil(depth/dz)+1;
+        boolean[][][] mask = null;
         mask = CageMasking.circularMasking(cageDims, dxy, rad, false); // null
         boolean useWalls = false;
 
@@ -180,7 +161,7 @@ public class RunSimulations {
         int[][] feedingPos = new int[][] {{cageDims[0]/2, cageDims[1]/2}};
         // Feeding periods (start/end in s):
         // Fra Eskil (Bjørøya): måltidene varte fra ca. kl. 07:30-17:30, i gjennomsnitt.
-        int[][] feedingPeriods = new int[][] {{10, 7200}, {27000, 63000}, {86400+27000, 86400+63000}, {2*86400+27000, 2*86400+63000},
+        int[][] feedingPeriods = new int[][] {/*{10, 7200}, */ {27000, 63000}, {86400+27000, 86400+63000}, {2*86400+27000, 2*86400+63000},
                 {3*86400+27000, 3*86400+63000}, {4*86400+27000, 4*86400+63000}, {5*86400+27000, 5*86400+63000},
                 {6*86400+27000, 6*86400+63000}, {7*86400+27000, 7*86400+63000}};
         int nPeriods = feedingPeriods.length;
@@ -274,8 +255,22 @@ public class RunSimulations {
 
         // If we are running in EnKF mode, let rank 0 initialize the EnKF class:
         if (doMPI && (rank==0)) {
-            enKF = new EnsembleKF(simNamePrefix, cageDims, dxy, ms);
+            enKF = new EnsembleKF(simNamePrefix, cageDims, as.nPar, dxy, ms);
         }
+
+        // Set up initial perturbation and parameter values:
+        double ambientO2_perturb = 0;
+        double[] current_perturb = new double[2];
+        double[] parVal = new double[] {0}; //[nPar];
+
+        // Initialize number formatter:
+        NumberFormat nf1 = NumberFormat.getNumberInstance(Locale.ENGLISH);
+        nf1.setMaximumFractionDigits(1); nf1.setMinimumFractionDigits(0);
+        // Initialize random number generator:
+        Random rnd = new Random();
+        // Other initialization:
+        double lastMeanFeedDepth = -1;
+
 
         // --------------------------------------------------------------------------
         // Simulations to run
@@ -377,8 +372,8 @@ public class RunSimulations {
             // Establish file names to write data to:
             NetcdfFileWriteable ncfile = null;
             NetcdfFileWriteable fishfile = null;
-            String ncfilePath = saveDir + filePrefix + simNamePostfix + "_"+String.format("%02d", rank)+".nc";
-            String fishfilePath = saveDir + filePrefix + simNamePostfix + "_"+String.format("%02d", rank)+"_fish.nc";
+            String ncfilePath = saveDir + filePrefix + simNamePostfix + (doMPI ? "_"+String.format("%02d", rank) : "")+".nc";
+            String fishfilePath = saveDir + filePrefix + simNamePostfix + (doMPI ? "_"+String.format("%02d", rank) : "")+"_fish.nc";
             boolean firstStore3d = true, firstStoreScalars = true;
 
             double totFeedAdded = 0;
@@ -416,9 +411,12 @@ public class RunSimulations {
                     // x component: speed*sin(direction)
                     // y component: speed*cos(direction)
                     for (int j = 0; j < obsCurrentComp1.length; j++) {
-                        obsCurrentComp1[j] = currentReductionFactor*
+                        // TEST TEST TEST TEST
+                        double currentReductionFactorHere = currentReductionFactor;
+                        currentReductionFactorHere *= Math.min(1.0, (1.+12.*(obsCurrentProfile[j]-0.06)));
+                        obsCurrentComp1[j] = currentReductionFactorHere*
                                 obsCurrentProfile[j]*Math.sin(obsCurrentDirProfile[j]*Math.PI/180.);
-                        obsCurrentComp2[j] = currentReductionFactor*
+                        obsCurrentComp2[j] = currentReductionFactorHere*
                                 obsCurrentProfile[j]*Math.cos(obsCurrentDirProfile[j]*Math.PI/180.);
                     }
 
@@ -430,12 +428,11 @@ public class RunSimulations {
 
                     if (!useCurrentMagic) {
                         for (int j = 0; j < interpProfile1.length; j++) {
-                            // TEST TEST TEST: override current
-                            double speedHereNow = Math.sqrt(interpProfile1[j]*interpProfile1[j] + interpProfile2[j]*interpProfile2[j]);
-                            currentProfile[j][0] = 0;//0.1317*speedHereNow;
-                            currentProfile[j][1] = 0;//0.9913*speedHereNow;
-                            /*currentProfile[j][0] = interpProfile1[j];
-                            currentProfile[j][1] = interpProfile2[j];*/
+                            //double speedHereNow = Math.sqrt(interpProfile1[j]*interpProfile1[j] + interpProfile2[j]*interpProfile2[j]);
+                            //currentProfile[j][0] = 0;//0.1317*speedHereNow;
+                            //currentProfile[j][1] = 0;//0.9913*speedHereNow;
+                            currentProfile[j][0] = interpProfile1[j];
+                            currentProfile[j][1] = interpProfile2[j];
                             currentProfile[j][2] = 0.;
                         }
                         // Update current field using the new profile:
@@ -455,10 +452,12 @@ public class RunSimulations {
                 }
 
                 // Update variable current speed offset:
-                currentOffset[0] = 0.05;//currentReductionFactor*currentSpeed*Math.cos(currentDirection*Math.PI/180.);
-                currentOffset[1] = 0.02;//currentReductionFactor*currentSpeed*Math.sin(currentDirection*Math.PI/180.);
+                currentOffset[0] = 0.;//currentReductionFactor*currentSpeed*Math.cos(currentDirection*Math.PI/180.);
+                currentOffset[1] = 0.;//currentReductionFactor*currentSpeed*Math.sin(currentDirection*Math.PI/180.);
 
-                diffKappaO2 = 0.2*Math.min(0.5, 10*Math.pow(currentReductionFactor*0.06,2)); // Math.min(0.5, 10*Math.pow(currentReductionFactor*0.04,2));
+                //diffKappaO2 = 0.2*Math.min(0.5, 10*Math.pow(currentReductionFactor*0.06,2)); // Math.min(0.5, 10*Math.pow(currentReductionFactor*0.04,2));
+                //diffKappaO2Z = 5.0*0.1*Math.min(0.5, 10*Math.pow(currentReductionFactor*0.06,2)); // Math.min(0.5, 10*Math.pow(currentReductionFactor*0.04,2));
+                diffKappaO2 = Math.min(0.5, 10*Math.pow(currentReductionFactor*0.06,2)); // Math.min(0.5, 10*Math.pow(currentReductionFactor*0.04,2));
                 diffKappaO2Z = 5.0*0.1*Math.min(0.5, 10*Math.pow(currentReductionFactor*0.06,2)); // Math.min(0.5, 10*Math.pow(currentReductionFactor*0.04,2));
                 //System.out.println("DiffKappa O2: "+diffKappaO2);
 
@@ -494,16 +493,16 @@ public class RunSimulations {
 
                 // Perturb if we are using MPI, except if we are using a twin, and this is the twin, and the
                 // twin is not to be perturbed.
-                if (doMPI && perturbThisMember) {
-                    ambientO2_perturb = Util.updateGaussMarkov(ambientO2_perturb, ambientO2Beta, ambientO2Std, dt, rnd);
+                if (doMPI && as.perturbThisMember) {
+                    ambientO2_perturb = Util.updateGaussMarkov(ambientO2_perturb, as.ambientO2Beta, as.ambientO2Std, dt, rnd);
                     for (int j = 0; j < ambientValueO2.length; j++) {
                         ambientValueO2_r[j] = ambientValueO2[j] + ambientO2_perturb;
                     }
                     for (int j = 0; j < 2; j++) {
-                        current_perturb[j] = Util.updateGaussMarkov(current_perturb[j], currentBeta, currentStd, dt, rnd);
+                        current_perturb[j] = Util.updateGaussMarkov(current_perturb[j], as.currentBeta, as.currentStd, dt, rnd);
                         currentOffset_r[j] = currentOffset[j] + current_perturb[j];
                     }
-                } else if (useTwin && (rank == N-1)) {
+                } else if (as.useTwin && (rank == N-1)) {
                     // This is the twin, introduce possible model error here.
                     for (int j = 0; j < ambientValueO2.length; j++) {
                         ambientValueO2_r[j] = ambientValueO2[j] + 0.25;
@@ -514,6 +513,19 @@ public class RunSimulations {
                     // Copy ambientValueO2 and currentOffset without perturbations:
                     System.arraycopy(ambientValueO2, 0, ambientValueO2_r, 0, ambientValueO2.length);
                     System.arraycopy(currentOffset, 0, currentOffset_r, 0, currentOffset.length);
+                }
+
+                // Perturb parameters according to their std. setting if we have any:
+                if (doMPI && as.perturbThisMember && as.nPar > 0) {
+                    for (int j=0; j<as.nPar; j++) {
+                        parVal[j] += as.parStd[j]*dt*rnd.nextGaussian();
+                    }
+
+                    // Apply parameter values to model:
+                    // Param 0: offset to ambient O2 values:
+                    for (int j = 0; j < ambientValueO2.length; j++) {
+                        ambientValueO2_r[j] += parVal[0];
+                    }
                 }
 
                 double[] r = ap.step(dt, fc, dxy, dz, useWalls, mask, sinkingSpeed, diffKappa, diffKappaZ, 
@@ -537,32 +549,34 @@ public class RunSimulations {
 
                 t = t + dt;
 
-                if (doMPI && i>0 && ((t/((double)enKFInterval) - Math.floor(t/(double)enKFInterval)) < 1e-5)) {
-                    double[][] X = mpi.gatherStateToRank0(o2);
+                if (doMPI && i>0 && ((t/((double)as.enKFInterval) - Math.floor(t/(double)as.enKFInterval)) < 1e-5)) {
+                    double[][] X = mpi.gatherStateToRank0(o2, parVal);
                     if (isRoot) {
                         System.out.println("Calling EnKF");
                         long tic = System.currentTimeMillis();
-                        double[][] X_a = enKF.doAnalysis(t, X, useTwin, locDist/dxy, locZMultiplier, inData);
+                        double[][] X_a = enKF.doAnalysis(t, X, as.useTwin, as.locDist/dxy, as.locZMultiplier, inData);
                         long duration = System.currentTimeMillis() - tic;
                         if (duration > 1000L)
                             System.out.println("Analysis took "+(duration/1000L)+" seconds.");
                         else
                             System.out.println("Analysis took "+duration+" ms.");
-                        if (!dryRun) {
-                            mpi.distributeAnalysisFromRank0(X_a, o2, cageDims);
+                        if (!as.dryRun) {
+                            mpi.distributeAnalysisFromRank0(X_a, o2, parVal, cageDims, as.nPar);
                         }
-                    } else if (!dryRun) {
-                        if (!useTwin || (rank < N-1)) {
-                            mpi.receiveAnalysisFromRank0(o2, cageDims);
+                    } else if (!as.dryRun) {
+                        if (!as.useTwin || (rank < N-1)) {
+                            mpi.receiveAnalysisFromRank0(o2, parVal, cageDims, as.nPar);
                         }
                     }
                 }
 
                 if (i>0 && ((t/((double)storeIntervalFeed) - Math.floor(t/(double)storeIntervalFeed)) < 1e-5)) {
-                    double elapsed = (double) ((System.currentTimeMillis() - stime)) / 60000.;
-                    double fractionCompleted = ((double) i) / ((double) n_steps);
-                    double remaining = (elapsed / fractionCompleted) - elapsed;
-                    System.out.println("t = " + nf1.format(t) + " - Estimated time to complete: " + nf1.format(remaining) + " minutes");
+                    if (isRoot) {
+                        double elapsed = (double) ((System.currentTimeMillis() - stime)) / 60000.;
+                        double fractionCompleted = ((double) i) / ((double) n_steps);
+                        double remaining = (elapsed / fractionCompleted) - elapsed;
+                        System.out.println("t = " + nf1.format(t) + " - Estimated time to complete: " + nf1.format(remaining) + " minutes");
+                    }
 
                     if (firstStore3d) {
                         firstStore3d = false;
