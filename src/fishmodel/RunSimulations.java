@@ -48,7 +48,7 @@ public class RunSimulations {
 
         // Save files:
         String saveDir = "./";
-        String simNamePrefix = "V_currfac";//"highdiff2_highero2_within_dsred_2m_";
+        String simNamePrefix = "test";//"highdiff2_highero2_within_dsred_2m_";
         String simNamePostfix = "";
 
         boolean doMPI = false; // Will be set to true if we are running is EnKF mode using MPI
@@ -78,9 +78,10 @@ public class RunSimulations {
         boolean varyAmbient = false; // Reduction in ambient values towards the rest of the farm
         //double addRedMult = 0.65*0.015; // Scale factor for reduction in ambient values
 
-        boolean decreasingCurrentFactor = false;
+        boolean decreasingCurrentFactor = false; // Model gradual decrease in current factor due to
+                                                // increasing cage net biofouling
 
-        boolean useCurrentMagic = false;
+        boolean useCurrentMagic = false; // Use spatially variable current flow field
         CurrentMagicFields cmf = null;
         if (useCurrentMagic) {
             cmf = new CurrentMagicFields("C:/Users/alver/OneDrive - NTNU/prosjekt/O2_Bjørøya/currentmagic/currents_bjoroya_2m.nc");
@@ -107,7 +108,8 @@ public class RunSimulations {
         int storeIntervalFeed = 600, storeIntervalInfo = 60;
         double fishMaxDepth = 20; // The maximum depth of the fish under non-feeding conditions
 
-        double currentReductionFactor = (useCurrentMagic ? 1.0 : 0.8); // Multiplier for inside current as function of outside
+        double currentReductionFactor = (useCurrentMagic ? 1.0 : 0.8); // Multiplier for inside current
+                                                                    // as function of outside
 
         // Environmental conditions:
         double currentSpeedInit = 2*0.04; // External current speed (m/s)
@@ -118,7 +120,6 @@ public class RunSimulations {
         // Oxygen diffusion constant (values updated further down)
         double diffKappaO2 = 0.1, diffKappaO2Z = 0.1;
 
-        int[] cageDims = new int[3];
         double[] currentOffset = new double[] {0,0,0}; // Global current vector
         double[] currentOffset_r = new double[] {0,0,0}; // Perturbed global current vector
 
@@ -146,33 +147,29 @@ public class RunSimulations {
         // Set up cage dimensions and cage grid:
         double modelDim = 2*(rad+4*dxy);
         //double modelDim = 2*(rad+2.5*rad); // TEST TEST TEST extra padding
+        int[] cageDims = new int[3];
         cageDims[0] = (int)Math.ceil(modelDim/dxy);
         cageDims[1] = cageDims[0];
         cageDims[2] = (int)Math.ceil(depth/dz)+1;
         boolean[][][] mask = null;
         mask = CageMasking.circularMasking(cageDims, dxy, rad, false); // null
         boolean useWalls = false;
-
         System.out.println("Domain dimensions: ("+cageDims[0]+", "+cageDims[1]+", "+cageDims[2]+")");
 
         // Feeding setup:
         int[][] feedingPos = new int[][] {{cageDims[0]/2, cageDims[1]/2}};
         // Feeding periods (start/end in s):
         // Fra Eskil (Bjørøya): måltidene varte fra ca. kl. 07:30-17:30, i gjennomsnitt.
-        int[][] feedingPeriods = new int[][] {/*{10, 7200}, */ {27000, 63000}, {86400+27000, 86400+63000}, {2*86400+27000, 2*86400+63000},
+        int[][] feedingPeriods = new int[][] {{27000, 63000}, {86400+27000, 86400+63000}, {2*86400+27000, 2*86400+63000},
                 {3*86400+27000, 3*86400+63000}, {4*86400+27000, 4*86400+63000}, {5*86400+27000, 5*86400+63000},
                 {6*86400+27000, 6*86400+63000}, {7*86400+27000, 7*86400+63000}};
         int nPeriods = feedingPeriods.length;
-        /*int[][] feedingPeriods = new int[][] {{1*3600, 2*3600}, {3*3600, 4*3600}, {5*3600, 6*3600},
-                {7*3600, 8*3600}, {9*3600, 10*3600}, {11*3600, 12*3600}, {13*3600, 14*3600}, {15*3600, 16*3600},
-                {17*3600, 18*3600}, {19*3600, 20*3600}, {21*3600, 22*3600}, {23*3600, 24*3600}, {25*3600, 26*3600},
-                {27*3600, 28*3600}, {29*3600, 30*3600}, {31*3600, 32*3600}};*/
         for (int i=0; i<nPeriods; i++) {
             System.out.println("Feeding period "+(i+1)+": "+feedingPeriods[i][0]+" to "+feedingPeriods[i][1]);
         }
         Object sourceTerm = null;
 
-        double[] ambientValueFeed = new double[cageDims[2]];
+        double[] ambientValueFeed = new double[cageDims[2]]; // Outside feed concentrations are set to 0
         for (int i = 0; i < ambientValueFeed.length; i++) {
             ambientValueFeed[i] = 0;
         }
@@ -199,47 +196,27 @@ public class RunSimulations {
             System.out.println(o2Names[i]+": "+o2Pos[i][0]+" , "+o2Pos[i][1]+" , "+o2Pos[i][2]+", mask="+mask[o2Pos[i][0]][o2Pos[i][1]][o2Pos[i][2]]);
         }
 
-        // Feed affinity:
+        // Feed affinity (determines how "interested" the fish is in feeding in each model grid cell):
         double[][][] affinity = new double[cageDims[0]][cageDims[1]][cageDims[2]];
-        for (int i=0; i<cageDims[0]; i++)
-            for (int j=0; j<cageDims[1]; j++)
-                for (int k=0; k<cageDims[2]; k++) {
-                    //double depth = (k+0.5)*dz;
-                    //if (depth > 10) affinity[i][j][k] = Math.max(0, 1-(depth-10)/5);
-                    //else if (depth < 2)
-                    //   affinity[i][j][k] = 0.2;
-                    //else
-                    if (mask==null || mask[i][j][k])
-                        affinity[i][j][k] = 1;
+        // O2 affinity (determines the typical vertical distribution of the fish):
+        double[][][] o2Affinity = new double[cageDims[0]][cageDims[1]][cageDims[2]];
 
-                }
-
-        // O2 affinity:
-        // Vertical distribution data based on telemetry (8 individuals):
+        // Define vertical distribution based on telemetry data (from 8 individuals):
         double[] affProfile_orig = new double[] {0.0110, 0.0913, 0.8601, 2.1406, 2.7774, 2.6903, 2.5195, 2.2987, 2.0137,
                 1.7448, 1.5883, 1.3667, 1.2348, 1.0724, 0.9379, 0.7764, 0.7104, 0.5895, 0.5607, 0.4668, 0.3933,
                 0.4009, 0.2935, 0.1801, 0.1260, 0.0787, 0.0457, 0.0304};
-        double[] affProfile_half = new double[] {0.5055, 0.5457, 0.9301, 1.5703, 1.8887, 1.8452, 1.7597, 1.6494, 1.5069,
-                1.3724, 1.2942, 1.1834, 1.1174, 1.0362, 0.9690, 0.8882, 0.8552, 0.7947, 0.7804, 0.7334, 0.6966, 0.7004,
-                0.6467, 0.5901, 0.5630, 0.5393, 0.5228, 0.5152};
         double[] affProfile_flat = new double[] {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
-        double[] affProfile = useVerticalDist ? affProfile_orig /*affProfile_half*/ : affProfile_flat;
-
-
+        // Choose the flat or variable profile according to the "useVerticalDist" setting:
+        double[] affProfile = useVerticalDist ? affProfile_orig : affProfile_flat;
+        // Depths values for the values defined above:
         double[] affDepths = new double[] {0.5000, 1.5000, 2.5000, 3.5000, 4.5000, 5.5000, 6.5000, 7.5000, 8.5000,
                 9.5000, 10.5000, 11.5000, 12.5000, 13.5000, 14.5000, 15.5000, 16.5000, 17.5000, 18.5000, 19.5000,
                 20.5000, 21.5000, 22.5000, 23.5000, 24.5000, 25.5000, 26.5000, 27.5000};
-        /*double[] affProfile = new double[] {1, 1};
-        double[] affDepths = new double[] {0, 30};*/
         double[] affinityProfile = new double[cageDims[2]];
         interpolateVertical(affinityProfile, affDepths, affProfile, cageDims[2], dz);
 
-        for (int i = 0; i < affinityProfile.length; i++) {
-            double v = affinityProfile[i];
-            //System.out.println("Affinity: "+v);
-        }
-        double[][][] o2Affinity = new double[cageDims[0]][cageDims[1]][cageDims[2]];
+        // Set feeding and O2 affinity based on the chosen vertical profile and cage mask:
         double o2AffSum = setO2AffinityWithVerticalProfile(cageDims, dz, fishMaxDepth, mask, affinityProfile, o2Affinity, affinity);
         //double o2AffSum = setO2AffinityWithVerticalProfileAndEdgeDecrease(cageDims, rad, dxy, dz, fishMaxDepth, mask, affinityProfile, o2Affinity, affinity);
         int availableCellsForO2Uptake = countAvailableCellsForOxygenUptake(cageDims, dz, fishMaxDepth, mask);
