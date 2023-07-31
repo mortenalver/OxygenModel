@@ -55,7 +55,8 @@ public class Measurements {
 
         //return new int[] {0, 1, 2}; // Centre only
         //return new int[] {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}; // All sensors
-        return new int [] {0, 1, 2, 4, 7, 10};  // All at 10 m and all in centre
+        //return new int [] {0, 1, 2, 4, 7, 10};  // All at 10 m and all in centre
+        return new int[] {0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}; // All sensors except C10
 
         // Copied from python code:
         //return (0, 3, 6, 9) # All at 5 m

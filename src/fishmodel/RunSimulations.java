@@ -13,6 +13,7 @@ package fishmodel;
 import fishmodel.enkf.AssimSettings;
 import fishmodel.enkf.EnsembleKF;
 import fishmodel.enkf.Util;
+import fishmodel.hydraulics.Balanced3DHydraulics;
 import fishmodel.hydraulics.SimpleTankHydraulics;
 import fishmodel.pellets.*;
 import fishmodel.enkf.MpiHandler;
@@ -48,7 +49,7 @@ public class RunSimulations {
 
         // Save files:
         String saveDir = "./";
-        String simNamePrefix = "test";//"highdiff2_highero2_within_dsred_2m_";
+        String simNamePrefix = "assim3_infl";//"highdiff2_highero2_within_dsred_2m_";
         String simNamePostfix = "";
 
         boolean doMPI = false; // Will be set to true if we are running is EnKF mode using MPI
@@ -65,6 +66,9 @@ public class RunSimulations {
             rank = mpi.getRank();
             N = mpi.getN();
             doMPI = true;
+            // TEST TEST TEST:
+            AdvectPellets.disableMultiprocessing(); // No internal parallelization when running MPI
+            //
             if ((rank < N-1) || !as.useTwin || as.perturbTwin)
                 as.perturbThisMember = true;
         } catch (Throwable ex) {
@@ -75,10 +79,10 @@ public class RunSimulations {
 
         // Simulation settings:
         boolean maskO2WhenSaving = false;
-        boolean varyAmbient = false; // Reduction in ambient values towards the rest of the farm
+        boolean varyAmbient = true; // Reduction in ambient values towards the rest of the farm
         //double addRedMult = 0.65*0.015; // Scale factor for reduction in ambient values
 
-        boolean decreasingCurrentFactor = false; // Model gradual decrease in current factor due to
+        boolean decreasingCurrentFactor = true; // Model gradual decrease in current factor due to
                                                 // increasing cage net biofouling
 
         boolean useCurrentMagic = false; // Use spatially variable current flow field
@@ -86,6 +90,8 @@ public class RunSimulations {
         if (useCurrentMagic) {
             cmf = new CurrentMagicFields("C:/Users/alver/OneDrive - NTNU/prosjekt/O2_Bjørøya/currentmagic/currents_bjoroya_2m.nc");
         }
+
+        boolean use3dBalancedCurrent = false; // Use Balanced3DHydraulics
 
         boolean useVerticalDist = true; // Use non-uniform vertical distribution (defined further down)
                                         // for non-feeding fish
@@ -97,11 +103,11 @@ public class RunSimulations {
         // Simulation start time:
         int initYear = 2022, initMonth = Calendar.JUNE, initDate = 22, initHour = 0, initMin = 0, initSec = 0;
         double t_end = 1*24*3600;//1*24*3600; // Duration of simulation
-        int nSim = 9; // Number of days to simulate (separate sims)
+        int nSim = 1; // Number of days to simulate (separate sims)
+        int startAt = 0; // Set to >0 to skip one of more simulations, but count them in the sim numbering
 
         // Common settings:
         double rad = 25;
-        int startAt = 0; // Set to >0 to skip one of more simulations, but count them in the sim numbering
         double depth = 25, totDepth = 25; // Cage size (m)
         double dxy = 2, dz = dxy; // Model resolution (m)
         double dt = .5 * dxy; // Time step (s)
@@ -236,7 +242,7 @@ public class RunSimulations {
         // Set up initial perturbation and parameter values:
         double ambientO2_perturb = 0;
         double[] current_perturb = new double[2];
-        double[] parVal = new double[] {0}; //[nPar];
+        double[] parVal = new double[] {0, 0, 0}; //[nPar];
 
         // Initialize number formatter:
         NumberFormat nf1 = NumberFormat.getNumberInstance(Locale.ENGLISH);
@@ -386,9 +392,14 @@ public class RunSimulations {
                     // x component: speed*sin(direction)
                     // y component: speed*cos(direction)
                     for (int j = 0; j < obsCurrentComp1.length; j++) {
-                        // TEST TEST TEST TEST
                         double currentReductionFactorHere = currentReductionFactor;
-                        currentReductionFactorHere *= Math.min(1.0, (1.+12.*(obsCurrentProfile[j]-0.06)));
+                        // If we are using 3D balanced currents, use a factor of 1 here,
+                        // so we keep the original ambient currents. The reduction factor is instead
+                        // taken into account when the 3D field is calculated.
+                        if (use3dBalancedCurrent)
+                            currentReductionFactorHere = 1.0;
+
+                        //currentReductionFactorHere *= Math.min(1.0, (1.+12.*(obsCurrentProfile[j]-0.06))); // TEST
                         obsCurrentComp1[j] = currentReductionFactorHere*
                                 obsCurrentProfile[j]*Math.sin(obsCurrentDirProfile[j]*Math.PI/180.);
                         obsCurrentComp2[j] = currentReductionFactorHere*
@@ -411,7 +422,16 @@ public class RunSimulations {
                             currentProfile[j][2] = 0.;
                         }
                         // Update current field using the new profile:
-                        SimpleTankHydraulics.getProfileHydraulicField(hydro, cageDims, currentProfile);
+                        if (!use3dBalancedCurrent)
+                            // Create uniform current field for each layer:
+                            SimpleTankHydraulics.getProfileHydraulicField(hydro, cageDims, currentProfile);
+                        else
+                            // Create a balanced 3D current field based on the current profile:
+                            //Balanced3DHydraulics.getBjoroyaHydraulicField(cageDims, dxy, rad,
+                            //        currentReductionFactor, currentProfile, hydro);
+                            Balanced3DHydraulics.getTurbulentHydraulicField(cageDims, dxy, rad,
+                                    currentReductionFactor, currentProfile, hydro);
+                            //Balanced3DHydraulics.stats(hydro);
                     }
                     else {
                         double[] lDirections = new double[cageDims[2]],
@@ -492,15 +512,24 @@ public class RunSimulations {
 
                 // Perturb parameters according to their std. setting if we have any:
                 if (doMPI && as.perturbThisMember && as.nPar > 0) {
+
                     for (int j=0; j<as.nPar; j++) {
                         parVal[j] += as.parStd[j]*dt*rnd.nextGaussian();
                     }
 
+                    // The first three parameters are perturbations to ambient O2 at 5, 10 and 15 m. We need to
+                    // calculate a linear interpolaton of these to all model depths before applying it:
+                    double[] ambO2Par = new double[] {parVal[0], parVal[1], parVal[2]}; // Make array of amb O2 related parameters
+                    double[] interpAmbO2Par = new double[cageDims[2]];
+                    interpolateVertical(interpAmbO2Par, as.parDepths, ambO2Par, cageDims[2], dz);
+
                     // Apply parameter values to model:
                     // Param 0: offset to ambient O2 values:
-                    for (int j = 0; j < ambientValueO2.length; j++) {
+                    for (int j=0; j<cageDims[2]; j++)
+                        ambientValueO2_r[j] += interpAmbO2Par[j];
+                    /*for (int j = 0; j < ambientValueO2.length; j++) {
                         ambientValueO2_r[j] += parVal[0];
-                    }
+                    }*/
                 }
 
                 double[] r = ap.step(dt, fc, dxy, dz, useWalls, mask, sinkingSpeed, diffKappa, diffKappaZ, 
@@ -519,27 +548,30 @@ public class RunSimulations {
 
                 t = t + dt;
 
+                // Check if we are running with EnKF. If so, check if it is time to do model correction:
                 if (doMPI && i>0 && ((t/((double)as.enKFInterval) - Math.floor(t/(double)as.enKFInterval)) < 1e-5)) {
                     double[][] X = mpi.gatherStateToRank0(o2, parVal);
                     if (isRoot) {
                         System.out.println("Calling EnKF");
                         long tic = System.currentTimeMillis();
-                        double[][] X_a = enKF.doAnalysis(t, X, as.useTwin, as.locDist/dxy, as.locZMultiplier, inData);
+                        double[][] X_a = enKF.doAnalysis(t, X, as.useTwin, as.locDist/dxy, as.locZMultiplier,
+                                as.ensembleInflation, as.ensembleInflationFactor, inData);
                         long duration = System.currentTimeMillis() - tic;
                         if (duration > 1000L)
                             System.out.println("Analysis took "+(duration/1000L)+" seconds.");
                         else
                             System.out.println("Analysis took "+duration+" ms.");
-                        if (!as.dryRun) {
+                        if (!as.dryRun && !as.isDropOutActive(t)) { // We only apply corrections if we are not doing a dry run and not in a dropout interval
                             mpi.distributeAnalysisFromRank0(X_a, o2, parVal, cageDims, as.nPar);
                         }
-                    } else if (!as.dryRun) {
+                    } else if (!as.dryRun && !as.isDropOutActive(t)) { // We only apply corrections if we are not doing a dry run and not in a dropout interval
                         if (!as.useTwin || (rank < N-1)) {
                             mpi.receiveAnalysisFromRank0(o2, parVal, cageDims, as.nPar);
                         }
                     }
                 }
 
+                // Check if it is time to store 3D fields of feed and O2:
                 if (i>0 && ((t/((double)storeIntervalFeed) - Math.floor(t/(double)storeIntervalFeed)) < 1e-5)) {
                     if (isRoot) {
                         double elapsed = (double) ((System.currentTimeMillis() - stime)) / 60000.;
@@ -574,8 +606,8 @@ public class RunSimulations {
 
                 }
 
+                // Check if it is time to store scalar output values:
                 if (i>0 && ((t/((double)storeIntervalInfo) - Math.floor(t/(double)storeIntervalInfo)) < 1e-5)) {
-                //if ((t - Math.floor(t) < dt) && (Math.floor(t) % storeIntervalInfo == 0)) {
 
                     if (firstStoreScalars) {
                         firstStoreScalars = false;

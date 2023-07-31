@@ -31,7 +31,9 @@ public class EnsembleKF {
     }
 
     public double[][] doAnalysis(double t, double[][] dX, boolean useTwin,
-                                 double locDist, double locZMultiplier, InputDataNetcdf inData) {
+                                 double locDist, double locZMultiplier,
+                                 boolean ensembleInflation, double ensembleInflationFactor,
+                                 InputDataNetcdf inData) {
 
         int N = (useTwin ? dX.length-1: dX.length); // Set correct N corresponding to the ensemble X.
         //System.out.println("N = "+N);
@@ -160,8 +162,20 @@ public class EnsembleKF {
 
         DMatrixRMaj X_a = CommonOps_DDRM.add(X, corrections, null);
 
-        // TODO: ensemble inflation?
-
+        // Ensemble inflation:
+        if (ensembleInflation) {
+            // Compute mean of analysis:
+            CommonOps_DDRM.sumRows(X_a, X_mean);
+            CommonOps_DDRM.scale(1./N_d, X_mean);
+            // Expand mean into N identical columns:
+            CommonOps_DDRM.mult(X_mean, e_n, E_X);
+            // Compute X_a - E_X:
+            DMatrixRMaj X_a_minus_E_X = CommonOps_DDRM.subtract(X_a, E_X, null);
+            // Scale it by the inflation factor:
+            CommonOps_DDRM.scale(ensembleInflationFactor, X_a_minus_E_X);
+            // Compute the inflated ensemble state and put it into X_a:
+            CommonOps_DDRM.add(X_a_minus_E_X, E_X, X_a);
+        }
 
         // Save ensemble state:
         if (savingThisStep) {

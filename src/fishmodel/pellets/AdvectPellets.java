@@ -28,6 +28,10 @@ public class AdvectPellets {
 
     private double[][][] advect = null, diffus = null, newValues = null;
 
+    public static void disableMultiprocessing() {
+        numProcessors = 1;
+    }
+
     /**
      * Steps pellet model.
      * @param dt The time step.
