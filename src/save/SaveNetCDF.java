@@ -1,9 +1,7 @@
 package save;
 
-import ucar.ma2.Array;
-import ucar.ma2.ArrayDouble;
-import ucar.ma2.DataType;
-import ucar.ma2.InvalidRangeException;
+import fishmodel.Measurements;
+import ucar.ma2.*;
 import ucar.nc2.Attribute;
 import ucar.nc2.Dimension;
 import ucar.nc2.NetcdfFileWriteable;
@@ -18,16 +16,22 @@ import java.util.ArrayList;
 public class SaveNetCDF {
 
     public static NetcdfFileWriteable initializeFile(String f, int[] cageDims, double dxy, double dz) {
-        return initializeFile(f, cageDims, dxy, dz, null);
+        return initializeFile(f, cageDims, dxy, dz, null, null);
     }
 
 
     public static NetcdfFileWriteable initializeFile(String f, int[] cageDims, double dxy, double dz, String timeUnits) {
+        return initializeFile(f, cageDims, dxy, dz, timeUnits, null);
+    }
+    public static NetcdfFileWriteable initializeFile(String f, int[] cageDims, double dxy, double dz, String timeUnits,
+                                                     Measurements.MeasurementSet ms) {
         try {
             NetcdfFileWriteable ncfile = NetcdfFileWriteable.createNew(f);
             createTimeDimension(ncfile);
             createCageDimensions(ncfile, cageDims, dxy, dz);
             addMatdispAttributes(ncfile, dxy, dz);
+            if (ms != null)
+                addMeasurementAttributes(ncfile, ms);
             ncfile.create();
             ncfile.setRedefineMode(true);
             createTimeVariable(ncfile, timeUnits);
@@ -39,7 +43,6 @@ public class SaveNetCDF {
             return null;
         }
     }
-
 
 
     public static NetcdfFileWriteable initializeFishDataFile(String f, int fishCount) {
@@ -223,6 +226,39 @@ public class SaveNetCDF {
             ncfile.addGlobalAttribute("coordinate_north_poke", northPole);
             ncfile.addGlobalAttribute("latitude_of_projection_origin", 90);
             ncfile.addGlobalAttribute("standard_parallel", 0.0);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static void addMeasurementAttributes(NetcdfFileWriteable ncfile, Measurements.MeasurementSet ms) {
+        try {
+            ncfile.setRedefineMode(true);
+            // Store delimited string with sensor names:
+            String[] names = ms.names;
+            StringBuilder sb = new StringBuilder();
+            for (int i=0; i<names.length; i++) {
+                sb.append(names[i]);
+                if (i<names.length-1)
+                    sb.append("\t");
+            }
+            ncfile.addGlobalAttribute("sensorNames", sb.toString());
+            // Store sensor positions (x, y and z):
+            String chrs = "XYZ";
+            for (int i=0; i<3; i++) {
+                ArrayInt.D1 positions = new ArrayInt.D1(ms.pos.length);
+                for (int j=0; j<ms.pos.length; j++)
+                    positions.set(j, ms.pos[j][i]);
+                ncfile.addGlobalAttribute("sensorPositions"+chrs.substring(i,i+1), positions);
+            }
+            // Store which sensors are assimilated:
+            int[] as = Measurements.getSensorsToAssimilate();
+            ArrayInt.D1 assimSensors = new ArrayInt.D1(as.length);
+            for (int i = 0; i < as.length; i++) {
+                assimSensors.set(i, as[i]);
+            }
+            ncfile.addGlobalAttribute("sensorsAssimilated", assimSensors);
+
         } catch (IOException e) {
             e.printStackTrace();
         }

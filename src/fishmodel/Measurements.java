@@ -17,7 +17,7 @@ public class Measurements {
 
     public static MeasurementSet setupSensorPositionsBjoroya(int[] cageDims, double dxy, double dz, double rad) {
         MeasurementSet ms = new MeasurementSet();
-        ms.std = 5.*0.025;
+        ms.std = 0.05;
 
         ms.names = new String[] {"C_5", "C_10", "C_15", "M1_5", "M1_10", "M1_15", "M2_5", "M2_10", "M2_15",
                 "M3_5", "M3_10", "M3_15"};
@@ -49,6 +49,10 @@ public class Measurements {
         }
 
         return ms;
+    }
+
+    public static int[] getSensorsToAssimilate() {
+        return getSensorsToAssimilateBjoroya();
     }
 
     public static int[] getSensorsToAssimilateBjoroya() {

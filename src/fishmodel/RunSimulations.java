@@ -49,11 +49,11 @@ public class RunSimulations {
 
         // Save files:
         String saveDir = "./";
-        String simNamePrefix = "assim3_infl";//"highdiff2_highero2_within_dsred_2m_";
+        String simNamePrefix = "assim9"; //"assim6_o2pert_lbeta_nopar_dropout";
         String simNamePostfix = "";
 
         boolean doMPI = false; // Will be set to true if we are running is EnKF mode using MPI
-        AssimSettings as = new AssimSettings(); // Setting related to the EnKF are gathered in AssimSettings
+        AssimSettings as = new AssimSettings(); // Settings related to the EnKF are gathered in AssimSettings
         if (as.dryRun)
             simNamePrefix += "_dr";
 
@@ -69,7 +69,7 @@ public class RunSimulations {
             // TEST TEST TEST:
             AdvectPellets.disableMultiprocessing(); // No internal parallelization when running MPI
             //
-            if ((rank < N-1) || !as.useTwin || as.perturbTwin)
+            if (as.usePerturbations && ((rank < N-1) || !as.useTwin || as.perturbTwin))
                 as.perturbThisMember = true;
         } catch (Throwable ex) {
             ex.printStackTrace();
@@ -101,7 +101,7 @@ public class RunSimulations {
         //boolean includeHypoxiaAvoidance = true;     int checkAvoidanceInterval = 30, checkAvoidanceCount = 0;
 
         // Simulation start time:
-        int initYear = 2022, initMonth = Calendar.JUNE, initDate = 22, initHour = 0, initMin = 0, initSec = 0;
+        int initYear = 2022, initMonth = Calendar.JUNE, initDate = 27, initHour = 0, initMin = 0, initSec = 0;
         double t_end = 1*24*3600;//1*24*3600; // Duration of simulation
         int nSim = 1; // Number of days to simulate (separate sims)
         int startAt = 0; // Set to >0 to skip one of more simulations, but count them in the sim numbering
@@ -111,7 +111,7 @@ public class RunSimulations {
         double depth = 25, totDepth = 25; // Cage size (m)
         double dxy = 2, dz = dxy; // Model resolution (m)
         double dt = .5 * dxy; // Time step (s)
-        int storeIntervalFeed = 600, storeIntervalInfo = 60;
+        int storeIntervalFeed = 60, storeIntervalInfo = 60;
         double fishMaxDepth = 20; // The maximum depth of the fish under non-feeding conditions
 
         double currentReductionFactor = (useCurrentMagic ? 1.0 : 0.8); // Multiplier for inside current
@@ -151,7 +151,7 @@ public class RunSimulations {
         double diffKappaZ = diffKappa*kappa_z_mult;
 
         // Set up cage dimensions and cage grid:
-        double modelDim = 2*(rad+4*dxy);
+        double modelDim = 2*(rad+8*dxy);
         //double modelDim = 2*(rad+2.5*rad); // TEST TEST TEST extra padding
         int[] cageDims = new int[3];
         cageDims[0] = (int)Math.ceil(modelDim/dxy);
@@ -242,7 +242,10 @@ public class RunSimulations {
         // Set up initial perturbation and parameter values:
         double ambientO2_perturb = 0;
         double[] current_perturb = new double[2];
-        double[] parVal = new double[] {0, 0, 0}; //[nPar];
+        double o2Cons_perturb = 0; // Relative perturbation to total oxygen consumption to be updated per time step
+        double o2Cons_perturb_r = 0; // The perturbation to apply at this particular time step - may be set
+            // equal to o2Cons_perturb, or to the sum of o2Cons_perturb and an estimated consumption parameter.
+        double[] parVal = new double[] {0, 0, 0, 0}; //[nPar];
 
         // Initialize number formatter:
         NumberFormat nf1 = NumberFormat.getNumberInstance(Locale.ENGLISH);
@@ -486,6 +489,8 @@ public class RunSimulations {
 
                 totFeedAdded += dt * feedingRateMult;
 
+                o2Cons_perturb_r = 0.;
+
                 // Perturb if we are using MPI, except if we are using a twin, and this is the twin, and the
                 // twin is not to be perturbed.
                 if (doMPI && as.perturbThisMember) {
@@ -497,6 +502,8 @@ public class RunSimulations {
                         current_perturb[j] = Util.updateGaussMarkov(current_perturb[j], as.currentBeta, as.currentStd, dt, rnd);
                         currentOffset_r[j] = currentOffset[j] + current_perturb[j];
                     }
+                    o2Cons_perturb = Util.updateGaussMarkov(o2Cons_perturb, as.o2ConsBeta, as.o2ConsStd, dt, rnd);
+                    o2Cons_perturb_r = o2Cons_perturb;
                 } else if (as.useTwin && (rank == N-1)) {
                     // This is the twin, introduce possible model error here.
                     for (int j = 0; j < ambientValueO2.length; j++) {
@@ -530,6 +537,9 @@ public class RunSimulations {
                     /*for (int j = 0; j < ambientValueO2.length; j++) {
                         ambientValueO2_r[j] += parVal[0];
                     }*/
+
+                    // Parameter number 4 is additional perturbation to total o2 consumption:
+                    o2Cons_perturb_r += parVal[3];
                 }
 
                 double[] r = ap.step(dt, fc, dxy, dz, useWalls, mask, sinkingSpeed, diffKappa, diffKappaZ, 
@@ -543,7 +553,8 @@ public class RunSimulations {
 
 
                 double[] res = IngestionAndO2Tempprofile.calculateIngestion(dt, fc, o2, affinity, o2Affinity, o2AffSum,
-                        availableCellsForO2Uptake, ingDist, o2consDist, dxy, dz, mask, pelletWeight, ambientTemp, fish);
+                        availableCellsForO2Uptake, ingDist, o2consDist, dxy, dz, mask, pelletWeight, ambientTemp, fish,
+                        o2Cons_perturb_r);
                 double totalIntake = res[0], rho = res[1], o2ConsumptionRate = res[2];
 
                 t = t + dt;
@@ -582,7 +593,7 @@ public class RunSimulations {
 
                     if (firstStore3d) {
                         firstStore3d = false;
-                        ncfile = SaveNetCDF.initializeFile(ncfilePath, cageDims, 1, 1, unitString);
+                        ncfile = SaveNetCDF.initializeFile(ncfilePath, cageDims, 1, 1, unitString, ms);
                         SaveNetCDF.createCageVariables(ncfile, "feed", "ingDist", "o2", "o2consDist");
                     }
                     else {
@@ -611,7 +622,7 @@ public class RunSimulations {
 
                     if (firstStoreScalars) {
                         firstStoreScalars = false;
-                        fishfile = SaveNetCDF.initializeFile(fishfilePath, new int[]{fish.getNGroups(), 1, cageDims[2]}, 1, 1, unitString);
+                        fishfile = SaveNetCDF.initializeFile(fishfilePath, new int[]{fish.getNGroups(), 1, cageDims[2]}, 1, 1, unitString, ms);
                         SaveNetCDF.createProfileVariable(fishfile, "appetite", 0);
                         SaveNetCDF.createProfileVariable(fishfile, "ingested", 0);
                         SaveNetCDF.createProfileVariable(fishfile, "V", 0);

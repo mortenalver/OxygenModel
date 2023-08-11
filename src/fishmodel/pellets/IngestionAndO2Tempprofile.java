@@ -33,7 +33,7 @@ public class IngestionAndO2Tempprofile {
     public static double[] calculateIngestion(double dt, double[][][] feed, double[][][] o2, double[][][] affinity, double[][][] o2Affinity, double o2AffSum,
                                               int availableCellsForO2Uptake,
                                               double[][][] ingDist, double[][][] o2ConsDist, double dxy, double dz, boolean[][][] mask, double pelletWeight,
-                                              double[] T_w, SimpleFish fish) {
+                                              double[] T_w, SimpleFish fish, double o2Cons_perturb) {
         double N = fish.getTotalN();
         double WtotKg = 0.001*fish.getTotalW();
         if (N == 0)
@@ -180,7 +180,8 @@ public class IngestionAndO2Tempprofile {
                     if ((mask == null) || mask[i][j][k]) {
                         double consHere = 0;
                         for (int kg=0; kg< fish.getNGroups(); kg++) {
-                            consHere += o2consumptionMult*fish.getN(kg)*0.001*fish.getW(kg)*61.6*Math.pow(fish.getW(kg)*0.001, -0.33)*Math.pow(1.03, T_w[k])*Math.pow(1.79, U)/3600.0;
+                            consHere += o2consumptionMult*(1.0 + o2Cons_perturb)*fish.getN(kg)*0.001*fish.getW(kg)*61.6*Math.pow(fish.getW(kg)
+                                    *0.001, -0.33)*Math.pow(1.03, T_w[k])*Math.pow(1.79, U)/3600.0;
                         }
                         consHere *= betaBar[i][j][k];
                         bbsum += betaBar[i][j][k];

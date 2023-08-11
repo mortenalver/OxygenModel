@@ -24,9 +24,6 @@ public class MpiHandler {
         int nPar = parVal.length;
         if (rank==0) {
             double[][] allStates = new double[N][];
-            //double[][] allParVals = null;
-            //if (nPar > 0)
-            //    allParVals = new double[N][nPar];
             double[] vector = Util.reshapeArray(field);
             allStates[0] = new double[vector.length + nPar];
             System.arraycopy(vector, 0, allStates[0], 0, vector.length);
@@ -41,16 +38,8 @@ public class MpiHandler {
                     MPI.COMM_WORLD.Recv(parValRecv, 0, nPar, MPI.DOUBLE, i, 2);
                     System.arraycopy(parValRecv, 0, allStates[i], vector.length, nPar);
                 }
-                //System.out.println("Received data from rank "+i);
+
             }
-
-            /*for (int i=0; i< allStates.length; i++) {
-                for (int j=0; j<allStates[i].length; j++) {
-                    System.out.print(allStates[i][j]+"\t");
-                }
-                System.out.println("");
-            }*/
-
 
             return allStates;
         }
