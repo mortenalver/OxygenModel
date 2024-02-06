@@ -61,6 +61,10 @@ public class Util {
         return f * prev + Math.sqrt(1. - f * f) * rnd.nextGaussian() * sigma;
     }
 
+    public static double getGaussValue(double sigma, Random rnd) {
+        return sigma*rnd.nextGaussian();
+    }
+
     public static void main(String[] args) {
         int[] dims = new int[] {5, 5, 3};
         int index = getStateIndex(0,2,2, dims);

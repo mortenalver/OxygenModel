@@ -10,13 +10,10 @@
  */
 package fishmodel;
 
-import fishmodel.enkf.AssimSettings;
-import fishmodel.enkf.EnsembleKF;
-import fishmodel.enkf.Util;
+import fishmodel.enkf.*;
 import fishmodel.hydraulics.Balanced3DHydraulics;
 import fishmodel.hydraulics.SimpleTankHydraulics;
 import fishmodel.pellets.*;
-import fishmodel.enkf.MpiHandler;
 
 import java.io.File;
 import java.io.IOException;
@@ -49,7 +46,7 @@ public class RunSimulations {
 
         // Save files:
         String saveDir = "./";
-        String simNamePrefix = "assim9"; //"assim6_o2pert_lbeta_nopar_dropout";
+        String simNamePrefix = "enoi_aggr"; //"assim6_o2pert_lbeta_nopar_dropout";
         String simNamePostfix = "";
 
         boolean doMPI = false; // Will be set to true if we are running is EnKF mode using MPI
@@ -60,6 +57,7 @@ public class RunSimulations {
         int rank = 0, N=1;
         MpiHandler mpi = null;
         EnsembleKF enKF = null;
+        EnIO enOI = null;
         try {
             mpi = new MpiHandler(args);
             System.out.println("rank="+mpi.getRank()+", N="+mpi.getN());
@@ -101,8 +99,8 @@ public class RunSimulations {
         //boolean includeHypoxiaAvoidance = true;     int checkAvoidanceInterval = 30, checkAvoidanceCount = 0;
 
         // Simulation start time:
-        int initYear = 2022, initMonth = Calendar.JUNE, initDate = 27, initHour = 0, initMin = 0, initSec = 0;
-        double t_end = 1*24*3600;//1*24*3600; // Duration of simulation
+        int initYear = 2022, initMonth = Calendar.JUNE, initDate = 23, initHour = 0, initMin = 0, initSec = 0;
+        double t_end = 24*3600;//1*24*3600; // Duration of simulation
         int nSim = 1; // Number of days to simulate (separate sims)
         int startAt = 0; // Set to >0 to skip one of more simulations, but count them in the sim numbering
 
@@ -111,7 +109,7 @@ public class RunSimulations {
         double depth = 25, totDepth = 25; // Cage size (m)
         double dxy = 2, dz = dxy; // Model resolution (m)
         double dt = .5 * dxy; // Time step (s)
-        int storeIntervalFeed = 60, storeIntervalInfo = 60;
+        int storeIntervalFeed = 360, storeIntervalInfo = 60;
         double fishMaxDepth = 20; // The maximum depth of the fish under non-feeding conditions
 
         double currentReductionFactor = (useCurrentMagic ? 1.0 : 0.8); // Multiplier for inside current
@@ -151,7 +149,7 @@ public class RunSimulations {
         double diffKappaZ = diffKappa*kappa_z_mult;
 
         // Set up cage dimensions and cage grid:
-        double modelDim = 2*(rad+8*dxy);
+        double modelDim = 2*(rad+6*dxy);
         //double modelDim = 2*(rad+2.5*rad); // TEST TEST TEST extra padding
         int[] cageDims = new int[3];
         cageDims[0] = (int)Math.ceil(modelDim/dxy);
@@ -159,6 +157,7 @@ public class RunSimulations {
         cageDims[2] = (int)Math.ceil(depth/dz)+1;
         boolean[][][] mask = null;
         mask = CageMasking.circularMasking(cageDims, dxy, rad, false); // null
+
         boolean useWalls = false;
         System.out.println("Domain dimensions: ("+cageDims[0]+", "+cageDims[1]+", "+cageDims[2]+")");
 
@@ -219,6 +218,7 @@ public class RunSimulations {
         double[] affDepths = new double[] {0.5000, 1.5000, 2.5000, 3.5000, 4.5000, 5.5000, 6.5000, 7.5000, 8.5000,
                 9.5000, 10.5000, 11.5000, 12.5000, 13.5000, 14.5000, 15.5000, 16.5000, 17.5000, 18.5000, 19.5000,
                 20.5000, 21.5000, 22.5000, 23.5000, 24.5000, 25.5000, 26.5000, 27.5000};
+
         double[] affinityProfile = new double[cageDims[2]];
         interpolateVertical(affinityProfile, affDepths, affProfile, cageDims[2], dz);
 
@@ -239,13 +239,17 @@ public class RunSimulations {
             enKF = new EnsembleKF(simNamePrefix, cageDims, as.nPar, dxy, ms);
         }
 
+        if (!doMPI && as.useEnOI) {
+            enOI = new EnIO(simNamePrefix, as, cageDims, dxy, ms);
+        }
+
         // Set up initial perturbation and parameter values:
         double ambientO2_perturb = 0;
         double[] current_perturb = new double[2];
         double o2Cons_perturb = 0; // Relative perturbation to total oxygen consumption to be updated per time step
         double o2Cons_perturb_r = 0; // The perturbation to apply at this particular time step - may be set
             // equal to o2Cons_perturb, or to the sum of o2Cons_perturb and an estimated consumption parameter.
-        double[] parVal = new double[] {0, 0, 0, 0}; //[nPar];
+        double[] parVal = new double[as.nPar];
 
         // Initialize number formatter:
         NumberFormat nf1 = NumberFormat.getNumberInstance(Locale.ENGLISH);
@@ -494,6 +498,27 @@ public class RunSimulations {
                 // Perturb if we are using MPI, except if we are using a twin, and this is the twin, and the
                 // twin is not to be perturbed.
                 if (doMPI && as.perturbThisMember) {
+
+                    // Perturb anywhere: Repeat a given number of times:
+                    for (int allstatesrep=0; allstatesrep<as.allStatesNRep; allstatesrep++) {
+                        // Perturb all states randomly:
+                        // Pick a random point and a perturbation, and let it drop off by r^2
+                        int pt1 = (int) Math.floor(cageDims[0] * Math.random()),
+                                pt2 = (int) Math.floor(cageDims[1] * Math.random()),
+                                pt3 = (int) Math.floor(cageDims[2] * Math.random());
+                        double perturbVal = as.allStatesStd * rnd.nextGaussian();
+                        for (int ii = 0; ii < cageDims[0]; ii++)
+                            for (int jj = 0; jj < cageDims[1]; jj++)
+                                for (int kk = 0; kk < cageDims[2]; kk++) {
+                                    double distance = (dxy * Math.sqrt((ii - pt1) * (ii - pt1) + (jj - pt2) * (jj - pt2) + (kk - pt3) * (kk - pt3)) *
+                                            as.allStatesDistMultiplier) - as.allStatesMinDist;
+                                    if (distance <= 1)
+                                        o2[ii][jj][kk] += perturbVal;
+                                    else
+                                        o2[ii][jj][kk] += perturbVal / (distance * distance);
+                                }
+                    }
+
                     ambientO2_perturb = Util.updateGaussMarkov(ambientO2_perturb, as.ambientO2Beta, as.ambientO2Std, dt, rnd);
                     for (int j = 0; j < ambientValueO2.length; j++) {
                         ambientValueO2_r[j] = ambientValueO2[j] + ambientO2_perturb;
@@ -502,7 +527,7 @@ public class RunSimulations {
                         current_perturb[j] = Util.updateGaussMarkov(current_perturb[j], as.currentBeta, as.currentStd, dt, rnd);
                         currentOffset_r[j] = currentOffset[j] + current_perturb[j];
                     }
-                    o2Cons_perturb = Util.updateGaussMarkov(o2Cons_perturb, as.o2ConsBeta, as.o2ConsStd, dt, rnd);
+                    o2Cons_perturb = Util.getGaussValue(as.o2ConsStd, rnd);//Util.updateGaussMarkov(o2Cons_perturb, as.o2ConsBeta, as.o2ConsStd, dt, rnd);
                     o2Cons_perturb_r = o2Cons_perturb;
                 } else if (as.useTwin && (rank == N-1)) {
                     // This is the twin, introduce possible model error here.
@@ -524,6 +549,7 @@ public class RunSimulations {
                         parVal[j] += as.parStd[j]*dt*rnd.nextGaussian();
                     }
 
+                    /*
                     // The first three parameters are perturbations to ambient O2 at 5, 10 and 15 m. We need to
                     // calculate a linear interpolaton of these to all model depths before applying it:
                     double[] ambO2Par = new double[] {parVal[0], parVal[1], parVal[2]}; // Make array of amb O2 related parameters
@@ -533,13 +559,13 @@ public class RunSimulations {
                     // Apply parameter values to model:
                     // Param 0: offset to ambient O2 values:
                     for (int j=0; j<cageDims[2]; j++)
-                        ambientValueO2_r[j] += interpAmbO2Par[j];
-                    /*for (int j = 0; j < ambientValueO2.length; j++) {
+                        ambientValueO2_r[j] += interpAmbO2Par[j];*/
+                    for (int j = 0; j < ambientValueO2.length; j++) {
                         ambientValueO2_r[j] += parVal[0];
-                    }*/
+                    }
 
-                    // Parameter number 4 is additional perturbation to total o2 consumption:
-                    o2Cons_perturb_r += parVal[3];
+                    /*// Parameter number 4 is additional perturbation to total o2 consumption:
+                    o2Cons_perturb_r += parVal[3];*/
                 }
 
                 double[] r = ap.step(dt, fc, dxy, dz, useWalls, mask, sinkingSpeed, diffKappa, diffKappaZ, 
@@ -560,13 +586,12 @@ public class RunSimulations {
                 t = t + dt;
 
                 // Check if we are running with EnKF. If so, check if it is time to do model correction:
-                if (doMPI && i>0 && ((t/((double)as.enKFInterval) - Math.floor(t/(double)as.enKFInterval)) < 1e-5)) {
+                if (doMPI && i>0 && ((t/((double)as.assimInterval) - Math.floor(t/(double)as.assimInterval)) < 1e-5)) {
                     double[][] X = mpi.gatherStateToRank0(o2, parVal);
                     if (isRoot) {
                         System.out.println("Calling EnKF");
                         long tic = System.currentTimeMillis();
-                        double[][] X_a = enKF.doAnalysis(t, X, as.useTwin, as.locDist/dxy, as.locZMultiplier,
-                                as.ensembleInflation, as.ensembleInflationFactor, inData);
+                        double[][] X_a = enKF.doAnalysis(t, X, as, inData);
                         long duration = System.currentTimeMillis() - tic;
                         if (duration > 1000L)
                             System.out.println("Analysis took "+(duration/1000L)+" seconds.");
@@ -579,6 +604,23 @@ public class RunSimulations {
                         if (!as.useTwin || (rank < N-1)) {
                             mpi.receiveAnalysisFromRank0(o2, parVal, cageDims, as.nPar);
                         }
+                    }
+                }
+
+                // Check if we are running with EnOI. If so, check if it is time to do model correction:
+                if (!doMPI && as.useEnOI && ((t/((double)as.assimInterval) - Math.floor(t/(double)as.assimInterval)) < 1e-5)) {
+                    System.out.println("Calling EnOI");
+                    long tic = System.currentTimeMillis();
+                    // Make state vector from o2 field:
+                    double[] x_f = Util.reshapeArray(o2);
+                    double[][] x_a = enOI.doAnalysis(t, x_f, as, inData);
+                    long duration = System.currentTimeMillis() - tic;
+                    if (duration > 1000L)
+                        System.out.println("Analysis took "+(duration/1000L)+" seconds.");
+                    else
+                        System.out.println("Analysis took "+duration+" ms.");
+                    if (!as.dryRun && !as.isDropOutActive(t)) {
+                        Util.reshapeInto3d(x_a[0], o2, cageDims);
                     }
                 }
 

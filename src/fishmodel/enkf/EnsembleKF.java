@@ -20,6 +20,7 @@ public class EnsembleKF {
     private double dxy;
     Measurements.MeasurementSet measSet = null;
     DMatrixRMaj M = null;
+    DMatrixRMaj M_allsensors = null;
     int callCount = 0;
     final int saveInterval = 10; // Number of calls between each time we save data to file
     public EnsembleKF(String filePrefix, int[] cageDims, int nPar, double dxy, Measurements.MeasurementSet measSet) {
@@ -27,22 +28,21 @@ public class EnsembleKF {
         this.cageDims = cageDims;
         this.dxy = dxy;
         this.measSet = measSet;
-        M = Measurements.getMeasurementModelBjoroya(cageDims, nPar, measSet);
+        M = Measurements.getMeasurementModelBjoroya(cageDims, nPar, measSet, false);
+        M_allsensors = Measurements.getMeasurementModelBjoroya(cageDims, nPar, measSet, true);
     }
 
-    public double[][] doAnalysis(double t, double[][] dX, boolean useTwin,
-                                 double locDist, double locZMultiplier,
-                                 boolean ensembleInflation, double ensembleInflationFactor,
+    public double[][] doAnalysis(double t, double[][] dX, AssimSettings as,
                                  InputDataNetcdf inData) {
 
-        int N = (useTwin ? dX.length-1: dX.length); // Set correct N corresponding to the ensemble X.
+        int N = (as.useTwin ? dX.length-1: dX.length); // Set correct N corresponding to the ensemble X.
         //System.out.println("N = "+N);
         String file = filePrefix+"_ens.nc";
         boolean savingThisStep = false;
         if (first) {
             first = false;
-            enKFFile = SaveForEnKF.initializeEnKFFile(file, dX[0].length, N, M.getNumRows(), "seconds",
-                    cageDims, dxy);
+            enKFFile = SaveForEnKF.initializeEnKFFile(file, dX[0].length, N, M.getNumRows(), M_allsensors.getNumRows(),
+                    as.nPar, "seconds", cageDims, dxy, measSet);
             savingThisStep = true;
         } else {
             if (++callCount == saveInterval) {
@@ -60,9 +60,9 @@ public class EnsembleKF {
         // from a "twin" model running parallel to the ensemble. The set of states to measure is decided
         // by the measurement model provided by the measurements module.
         // If "useTwin" is False, we are using measurements loaded from file by the simInputsNetcdf module.
-        DMatrixRMaj D=null, D_exact=null;
+        DMatrixRMaj D=null, D_exact=null, D_all_exact = null;
 
-        if (useTwin) {
+        if (as.useTwin) {
             // Extract the first N-1 members as the ensemble, and the last as the twin:
             DMatrixRMaj X_ens = new DMatrixRMaj(X.getNumRows(),X.getNumCols()-1);
             CommonOps_DDRM.extract(X, 0, X.getNumRows(), 0,X.getNumCols()-1, X_ens);
@@ -79,7 +79,10 @@ public class EnsembleKF {
             for (int i=0; i<D.getNumRows(); i++)
                 for (int j=0; j<D.getNumCols(); j++)
                     D.add(i,j, measSet.std*rand.nextGaussian()); // Add gaussian noise according to measurement uncertainty
-            //System.out.println("D:"); System.out.println(D);
+            // Get a record of all measurements (not just assimilated sensors):
+            d = CommonOps_DDRM.mult(M_allsensors, X_twin, null);
+            D_all_exact = CommonOps_DDRM.mult(d, e_n, null);
+
 
         }
         else {
@@ -101,6 +104,13 @@ public class EnsembleKF {
                 for (int j=0; j<D.getNumCols(); j++)
                     D.add(i,j, measSet.std*rand.nextGaussian()); // Add gaussian noise according to measurement uncertainty
             //System.out.println("D:"); System.out.println(D);
+
+            // Get a record of all measurements (not just assimilated sensors):
+            d = new DMatrixRMaj(meas.length, 1);
+            for (int i = 0; i < meas.length; i++) {
+                d.set(i, 0, meas[i]);
+            }
+            D_all_exact = CommonOps_DDRM.mult(d, e_n, null);
         }
 
 
@@ -130,6 +140,7 @@ public class EnsembleKF {
 
         // Compute intermediary matrixes:
         DMatrixRMaj MX = CommonOps_DDRM.mult(M, X, null);
+        DMatrixRMaj MX_allsensors = CommonOps_DDRM.mult(M_allsensors, X, null);
         //System.out.println("M: "+M.getNumRows()+"x"+M.getNumCols());
         //System.out.println("MX: "+MX.getNumRows()+"x"+MX.getNumCols());
         DMatrixRMaj omega = CommonOps_DDRM.mult(M, theta, null);
@@ -145,12 +156,13 @@ public class EnsembleKF {
         System.out.println("D: "+D.getNumRows()+"x"+D.getNumCols());
         DMatrixRMaj deviations = CommonOps_DDRM.subtract(D, MX, null);
         DMatrixRMaj dev_exact = CommonOps_DDRM.subtract(D_exact, MX, null);
+        DMatrixRMaj dev_all_exact = CommonOps_DDRM.subtract(D_all_exact, MX_allsensors, null);
         //System.out.println("Deviations:");
         //System.out.println(deviations);
         //System.out.println("Dev exact:");
         //System.out.println(dev_exact);
 
-        DMatrixRMaj Kloc1 = getLocalizationMatrix(cageDims, M, numel, locDist, locZMultiplier);
+        DMatrixRMaj Kloc1 = getLocalizationMatrix(cageDims, M, numel, as.locDist, as.locZMultiplier);
 
         // Calculate Kalman gain:
         DMatrixRMaj K = CommonOps_DDRM.elementMult(Kloc1, CommonOps_DDRM.mult(CommonOps_DDRM.mult(theta, CommonOps_DDRM.transpose(omega,
@@ -163,7 +175,7 @@ public class EnsembleKF {
         DMatrixRMaj X_a = CommonOps_DDRM.add(X, corrections, null);
 
         // Ensemble inflation:
-        if (ensembleInflation) {
+        if (as.ensembleInflation) {
             // Compute mean of analysis:
             CommonOps_DDRM.sumRows(X_a, X_mean);
             CommonOps_DDRM.scale(1./N_d, X_mean);
@@ -172,7 +184,7 @@ public class EnsembleKF {
             // Compute X_a - E_X:
             DMatrixRMaj X_a_minus_E_X = CommonOps_DDRM.subtract(X_a, E_X, null);
             // Scale it by the inflation factor:
-            CommonOps_DDRM.scale(ensembleInflationFactor, X_a_minus_E_X);
+            CommonOps_DDRM.scale(as.ensembleInflationFactor, X_a_minus_E_X);
             // Compute the inflated ensemble state and put it into X_a:
             CommonOps_DDRM.add(X_a_minus_E_X, E_X, X_a);
         }
@@ -181,7 +193,7 @@ public class EnsembleKF {
         if (savingThisStep) {
             SaveForEnKF.saveEnKFVariables(enKFFile, t, m2A(X), m2A(X_a),
                     (X_twin != null ? m2A_1d(X_twin) : null), m2A(M),
-                    m2A(deviations), m2A(dev_exact), m2A(K), m2A(Kloc1));
+                    m2A(deviations), m2A(dev_exact), m2A(dev_all_exact), m2A(K), m2A(Kloc1));
             try {
                 enKFFile.close();
             } catch (IOException e) {

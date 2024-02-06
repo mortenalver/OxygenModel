@@ -10,7 +10,7 @@ import ucar.nc2.Variable;
 import java.io.IOException;
 import java.util.ArrayList;
 
-public class SaveForEnKF {
+public class SaveForEnOI {
 
     private static void createTimeDimension(NetcdfFileWriteable ncfile) {
         Dimension tDim = ncfile.addUnlimitedDimension("time");
@@ -26,8 +26,8 @@ public class SaveForEnKF {
             var.addAttribute(new Attribute("units", "seconds since 2000-01-01 00:00:00"));
     }
 
-    public static NetcdfFileWriteable initializeEnKFFile(String f, int nStates, int N, int m, int m_all, int nPar, String timeUnits,
-                                                         int[] cageDims, double dxy, Measurements.MeasurementSet ms) {
+    public static NetcdfFileWriteable initializeFile(String f, int nStates, int N, int m, int m_all, int nPar, String timeUnits,
+                                                     int[] cageDims, double dxy, Measurements.MeasurementSet ms) {
         try {
             NetcdfFileWriteable ncfile = NetcdfFileWriteable.createNew(f);
             addMeasurementAttributes(ncfile, ms);
@@ -42,15 +42,14 @@ public class SaveForEnKF {
             ncfile.create();
             ncfile.setRedefineMode(true);
             createTimeVariable(ncfile, timeUnits);
-            createVariable(ncfile, "X", "time", "yc", "xc");
-            createVariable(ncfile, "X_a", "time", "yc", "xc");
-            createVariable(ncfile, "X_t", "time", "xc");
+            createVariable(ncfile, "X_static", "yc", "xc");
+            createVariable(ncfile, "x_f", "time", "xc");
+            createVariable(ncfile, "x_a", "time", "xc");
             createVariable(ncfile, "M", "time", "xc", "zc");
-            createVariable(ncfile, "deviation", "time", "yc", "zc");
-            createVariable(ncfile, "deviation_exact", "time", "yc", "zc");
-            createVariable(ncfile, "deviation_all_exact", "time", "yc", "zc2");
-            createVariable(ncfile, "K", "time", "zc", "xc");
-            createVariable(ncfile, "Xloc", "time", "zc", "xc");
+            createVariable(ncfile, "deviation", "time", "zc");
+            createVariable(ncfile, "deviation_all", "time", "zc2");
+            createVariable(ncfile, "K", "zc", "xc");
+            createVariable(ncfile, "Xloc", "zc", "xc");
 
             ArrayInt cdA = new ArrayInt(new int[] {cageDims.length});
             for (int i = 0; i < cageDims.length; i++) {
@@ -137,6 +136,17 @@ public class SaveForEnKF {
         ncfile.write(name,  new int[] {tIndex, 0}, varData);
     }
 
+    public static void save2DVariableNoTime(NetcdfFileWriteable ncfile, String name, double[][] value, Dimension... dims) throws InvalidRangeException, IOException {
+
+        ArrayDouble.D2 varData = new ArrayDouble.D2(dims[0].getLength(), dims[1].getLength());
+
+        for (int i1=0; i1<dims[0].getLength(); i1++)
+            for (int i2=0; i2<dims[1].getLength(); i2++)
+                varData.set(i1, i2, value[i2][i1]);
+
+        ncfile.write(name,  new int[] {0, 0}, varData);
+    }
+
     public static void save2DVariable(NetcdfFileWriteable ncfile, String name, int tIndex, double[][] value, Dimension... dims) throws InvalidRangeException, IOException {
 
         ArrayDouble.D3 varData = new ArrayDouble.D3(1, dims[0].getLength(), dims[1].getLength());
@@ -148,9 +158,28 @@ public class SaveForEnKF {
         ncfile.write(name,  new int[] {tIndex, 0, 0}, varData);
     }
 
-    public static void saveEnKFVariables(NetcdfFileWriteable ncfile, double time, double[][] X, double[][] X_a,
-                                     double[] X_twin, double[][] M, double[][] dev, double[][] dev_exact,
-                                     double[][] dev_all_exact, double[][] K, double[][] Xloc) {
+    public static void saveStaticVariables(NetcdfFileWriteable ncfile, double time, double[][] X_static,
+                                     double[][] Xloc, double[][] K) {
+        try {
+            Dimension xDim = ncfile.findDimension("xc"),
+                    yDim = ncfile.findDimension("yc"),
+                    zDim = ncfile.findDimension("zc"),
+                    zDim2 = ncfile.findDimension("zc2");
+
+            save2DVariableNoTime(ncfile,  "X_static", X_static, yDim, xDim);
+            save2DVariableNoTime(ncfile,  "K", K, zDim, xDim);
+            save2DVariableNoTime(ncfile,  "Xloc", Xloc, zDim, xDim);
+        } catch (InvalidRangeException e) {
+            throw new RuntimeException(e);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+
+    public static void saveVariables(NetcdfFileWriteable ncfile, double time,
+                                     double[] x_f, double[] x_a, double[] dev,
+                                     double[] dev_all) {
         try {
             Dimension tDim = ncfile.findDimension("time"),
                     xDim = ncfile.findDimension("xc"),
@@ -162,22 +191,19 @@ public class SaveForEnKF {
             int[] timeOrigin = new int[]{tDim.getLength()};
             ncfile.write("time", timeOrigin, timeData);
 
-            int[] dataOrigin = new int[] {tDim.getLength()-1, 0, 0, 0};
 
-            save2DVariable(ncfile,  "X", tDim.getLength()-1, X, yDim, xDim);
-            save2DVariable(ncfile,  "X_a", tDim.getLength()-1, X_a, yDim, xDim);
-            if (X_twin != null)
-                save1DVariable(ncfile,  "X_t", tDim.getLength()-1, X_twin, xDim);
+            //save2DVariable(ncfile,  "X_a", tDim.getLength()-1, X_a, yDim, xDim);
 
-            save2DVariable(ncfile,  "M", tDim.getLength()-1, M, xDim, zDim);
-            save2DVariable(ncfile,  "deviation", tDim.getLength()-1, dev, yDim, zDim);
-            save2DVariable(ncfile,  "deviation_exact", tDim.getLength()-1, dev_exact, yDim, zDim);
-            save2DVariable(ncfile,  "deviation_all_exact", tDim.getLength()-1, dev_all_exact, yDim, zDim2);
+            //save2DVariable(ncfile,  "M", tDim.getLength()-1, M, xDim, zDim);
+            save1DVariable(ncfile,  "x_f", tDim.getLength()-1, x_f, xDim);
+            save1DVariable(ncfile,  "x_a", tDim.getLength()-1, x_a, xDim);
+            save1DVariable(ncfile,  "deviation", tDim.getLength()-1, dev, zDim);
+            save1DVariable(ncfile,  "deviation_all", tDim.getLength()-1, dev_all, zDim2);
             //System.out.println("K double: "+K.length+" by "+K[0].length);
             //System.out.println("xdim: "+xDim.getLength());
             //System.out.println("zdim: "+zDim.getLength());
-            save2DVariable(ncfile,  "K", tDim.getLength()-1, K, zDim, xDim);
-            save2DVariable(ncfile,  "Xloc", tDim.getLength()-1, Xloc, zDim, xDim);
+            //save2DVariable(ncfile,  "K", tDim.getLength()-1, K, zDim, xDim);
+            //save2DVariable(ncfile,  "Xloc", tDim.getLength()-1, Xloc, zDim, xDim);
 
         } catch (InvalidRangeException e) {
             throw new RuntimeException(e);

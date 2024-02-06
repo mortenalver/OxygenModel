@@ -146,7 +146,7 @@ public class InputDataNetcdf {
 
     public void setStartTime(Date startTime) {
         sTime = startTime.getTime();
-        System.out.println(startTime.toString());
+        System.out.println("StartTime: "+startTime.toString());
         System.out.println();
         while (((piv++) < (ltime.length-1)) && (ltime[piv+1]<sTime));
         //System.out.println("piv = "+piv);
