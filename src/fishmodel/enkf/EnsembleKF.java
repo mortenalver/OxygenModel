@@ -23,6 +23,10 @@ public class EnsembleKF {
     DMatrixRMaj M_allsensors = null;
     int callCount = 0;
     final int saveInterval = 10; // Number of calls between each time we save data to file
+
+    EnOI enOI = null; // Reference to EnOI object. Instantiated if we are using a hybrid algorithm
+    DMatrixRMaj K_enOI = null; // Reference to EnOI Kalman gain. Instantiated if we are using a hybrid algorithm
+
     public EnsembleKF(String filePrefix, int[] cageDims, int nPar, double dxy, Measurements.MeasurementSet measSet) {
         this.filePrefix = filePrefix;
         this.cageDims = cageDims;
@@ -30,6 +34,7 @@ public class EnsembleKF {
         this.measSet = measSet;
         M = Measurements.getMeasurementModelBjoroya(cageDims, nPar, measSet, false);
         M_allsensors = Measurements.getMeasurementModelBjoroya(cageDims, nPar, measSet, true);
+
     }
 
     public double[][] doAnalysis(double t, double[][] dX, AssimSettings as,
@@ -44,6 +49,14 @@ public class EnsembleKF {
             enKFFile = SaveForEnKF.initializeEnKFFile(file, dX[0].length, N, M.getNumRows(), M_allsensors.getNumRows(),
                     as.nPar, "seconds", cageDims, dxy, measSet);
             savingThisStep = true;
+
+            if (as.hybrid_EnKF_ENOI) {
+                enOI = new EnOI(filePrefix+"_enoi", as, cageDims, dxy, measSet);
+                enOI.calculateKalmanGain(t, as);
+                K_enOI = enOI.getKalmanGain();
+                System.out.println("K_enOI: "+K_enOI.getNumRows()+" x "+K_enOI.getNumCols());
+
+            }
         } else {
             if (++callCount == saveInterval) {
                 enKFFile = SaveForEnKF.openFile(file);
@@ -167,9 +180,35 @@ public class EnsembleKF {
         // Calculate Kalman gain:
         DMatrixRMaj K = CommonOps_DDRM.elementMult(Kloc1, CommonOps_DDRM.mult(CommonOps_DDRM.mult(theta, CommonOps_DDRM.transpose(omega,
                 null), null), phi_inv, null), null);
+        System.out.println("K: "+K.getNumRows()+" x "+K.getNumCols());
         CommonOps_DDRM.scale(1./N_1, K);
 
-        DMatrixRMaj corrections = CommonOps_DDRM.mult(K, deviations, null);
+        DMatrixRMaj corrections = null;
+        // Check if we are running a hybrid setup:
+        if (as.hybrid_EnKF_ENOI) {
+            DMatrixRMaj K_EnOI_now = null;
+            // Calculate a weighted average of the EnKF and EnOI kalman gains.
+            if (as.nPar > 0) {
+                // We need to copy K elements for parameter adjustments from the EnKF K since EnOI doesn't include parameters:
+                DMatrixRMaj parRows = new DMatrixRMaj(as.nPar, K.getNumCols());
+                CommonOps_DDRM.extract(K, K.getNumRows()-as.nPar, K.getNumRows(), 0, K.getNumCols(), parRows);
+                System.out.println("parRows: "+parRows.getNumRows()+" x "+parRows.getNumCols());
+                K_EnOI_now = CommonOps_DDRM.concatRowsMulti(K_enOI, parRows);
+                System.out.println("K_EnOI_now: "+K_EnOI_now.getNumRows()+" x "+K_EnOI_now.getNumCols());
+            } else {
+                K_EnOI_now = K_enOI;
+            }
+            CommonOps_DDRM.scale(as.hybrid_ENOI_weight, K_EnOI_now);
+            DMatrixRMaj K_copy = new DMatrixRMaj(K);
+            CommonOps_DDRM.scale(1.0-as.hybrid_ENOI_weight, K_copy);
+            DMatrixRMaj K_weighted = CommonOps_DDRM.add(K_copy, K_EnOI_now, null);
+            System.out.println("K_weighted: "+K_weighted.getNumRows()+" x "+K_weighted.getNumCols());
+            corrections = CommonOps_DDRM.mult(K_weighted, deviations, null);
+        }
+        else {
+            // Not hybrid, so just go ahead with the K we computed:
+            corrections = CommonOps_DDRM.mult(K, deviations, null);
+        }
         //System.out.println("Corrections: "+corrections.getNumRows()+"x"+corrections.getNumCols());
 
         DMatrixRMaj X_a = CommonOps_DDRM.add(X, corrections, null);

@@ -2,22 +2,25 @@ package fishmodel.enkf;
 
 public class AssimSettings {
 
-    public boolean useEnOI = true; // Use EnOI instead of EnKF. This value is disregarded if running in MPI mode.
+    public boolean useEnOI = false; // Use EnOI instead of EnKF. This value is disregarded if running in MPI mode.
+    public boolean hybrid_EnKF_ENOI = false;
+    public double hybrid_ENOI_weight = 0.5; // Relative weighting of ENOI K matrix in hybrid setup
     public String[] enOIEnsembleFile = new String[]{
             //"C:\\Users\\alver\\Work\\BjoroyaSim\\highstorage27_06.nc"
-            "C:\\Users\\alver\\Work\\BjoroyaSim\\static22_06.nc",
-            "C:\\Users\\alver\\Work\\BjoroyaSim\\static23_06.nc",
-            "C:\\Users\\alver\\Work\\BjoroyaSim\\static24_06.nc",
-            "C:\\Users\\alver\\Work\\BjoroyaSim\\static25_06.nc",
-            "C:\\Users\\alver\\Work\\BjoroyaSim\\static26_06.nc",
-            "C:\\Users\\alver\\Work\\BjoroyaSim\\static27_06.nc",
-            "C:\\Users\\alver\\Work\\BjoroyaSim\\static28_06.nc",
-            "C:\\Users\\alver\\Work\\BjoroyaSim\\static29_06.nc",
-            "C:\\Users\\alver\\Work\\BjoroyaSim\\static30_06.nc"
+            "static22_06.nc",
+            "static23_06.nc",
+            "static24_06.nc",
+            "static25_06.nc",
+            "static26_06.nc",
+            "static27_06.nc",
+            "static28_06.nc",
+            "static29_06.nc",
+            "static30_06.nc"
     };
 
+
     //public String enOIEnsembleFile = "C:\\Users\\alver\\Work\\BjoroyaSim\\enoitest_dr24_06.nc";
-    public double enoiAlpha = 0.2;
+    public double enoiAlpha = 0.1;
 
     public boolean useTwin = false; // If running EnKF, this variable is set to true if running a twin experiment
     // where measurements are acquired from the last (N-1) parallel model
@@ -36,7 +39,7 @@ public class AssimSettings {
         correctionsDropOutEndS = 6*3600;
 
     public int assimInterval = 60;
-    public double locDist=15/*30*/, locZMultiplier=3;
+    public double locDist= 30/*15*/ /*30*/, locZMultiplier=3;
 
     /* Ensemble inflation "blows up" the variability within the ensemble after each analysis step. It is a simple
      * way of increasing the variances/covariances with the effect of making KF corrections stronger.
@@ -46,7 +49,7 @@ public class AssimSettings {
     public boolean ensembleInflation = false;
     public double ensembleInflationFactor = 1.05;
 
-    public double allStatesStd = 0.008;
+    public double allStatesStd = 0.25*0.008;
     public double allStatesMinDist = 8.;
     public double allStatesDistMultiplier = 1./30.;
     public int allStatesNRep = 6;

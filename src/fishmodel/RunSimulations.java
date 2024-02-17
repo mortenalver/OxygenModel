@@ -46,7 +46,7 @@ public class RunSimulations {
 
         // Save files:
         String saveDir = "./";
-        String simNamePrefix = "enoi_aggr"; //"assim6_o2pert_lbeta_nopar_dropout";
+        String simNamePrefix = "enkf_basic"; //"assim6_o2pert_lbeta_nopar_dropout";
         String simNamePostfix = "";
 
         boolean doMPI = false; // Will be set to true if we are running is EnKF mode using MPI
@@ -57,7 +57,7 @@ public class RunSimulations {
         int rank = 0, N=1;
         MpiHandler mpi = null;
         EnsembleKF enKF = null;
-        EnIO enOI = null;
+        EnOI enOI = null;
         try {
             mpi = new MpiHandler(args);
             System.out.println("rank="+mpi.getRank()+", N="+mpi.getN());
@@ -77,12 +77,9 @@ public class RunSimulations {
 
         // Simulation settings:
         boolean maskO2WhenSaving = false;
-        boolean varyAmbient = true; // Reduction in ambient values towards the rest of the farm
-        //double addRedMult = 0.65*0.015; // Scale factor for reduction in ambient values
-
-        boolean decreasingCurrentFactor = true; // Model gradual decrease in current factor due to
+        boolean varyAmbient = false; // Reduction in ambient values towards the rest of the farm
+        boolean decreasingCurrentFactor = false; // Model gradual decrease in current factor due to
                                                 // increasing cage net biofouling
-
         boolean useCurrentMagic = false; // Use spatially variable current flow field
         CurrentMagicFields cmf = null;
         if (useCurrentMagic) {
@@ -91,7 +88,7 @@ public class RunSimulations {
 
         boolean use3dBalancedCurrent = false; // Use Balanced3DHydraulics
 
-        boolean useVerticalDist = true; // Use non-uniform vertical distribution (defined further down)
+        boolean useVerticalDist = false; // Use non-uniform vertical distribution (defined further down)
                                         // for non-feeding fish
 
         boolean useInstantaneousAmbientVals = true; // true to use ambient value time series, false to use daily averages
@@ -99,7 +96,7 @@ public class RunSimulations {
         //boolean includeHypoxiaAvoidance = true;     int checkAvoidanceInterval = 30, checkAvoidanceCount = 0;
 
         // Simulation start time:
-        int initYear = 2022, initMonth = Calendar.JUNE, initDate = 23, initHour = 0, initMin = 0, initSec = 0;
+        int initYear = 2022, initMonth = Calendar.JUNE, initDate = 27, initHour = 0, initMin = 0, initSec = 0;
         double t_end = 24*3600;//1*24*3600; // Duration of simulation
         int nSim = 1; // Number of days to simulate (separate sims)
         int startAt = 0; // Set to >0 to skip one of more simulations, but count them in the sim numbering
@@ -240,7 +237,7 @@ public class RunSimulations {
         }
 
         if (!doMPI && as.useEnOI) {
-            enOI = new EnIO(simNamePrefix, as, cageDims, dxy, ms);
+            enOI = new EnOI(simNamePrefix, as, cageDims, dxy, ms);
         }
 
         // Set up initial perturbation and parameter values:

@@ -1,16 +1,9 @@
 package fishmodel.enkf;
 
-import com.sun.security.jgss.GSSUtil;
 import fishmodel.Measurements;
-import fishmodel.plotting.ContourDataset;
-import fishmodel.plotting.ContourGraph;
 import fishmodel.sim.InputDataNetcdf;
 import org.ejml.data.DMatrixRMaj;
 import org.ejml.dense.row.CommonOps_DDRM;
-import org.jfree.chart.ChartFactory;
-import org.jfree.chart.ChartPanel;
-import org.jfree.chart.JFreeChart;
-import save.SaveForEnKF;
 import save.SaveForEnOI;
 import ucar.ma2.ArrayDouble;
 import ucar.ma2.InvalidRangeException;
@@ -18,12 +11,10 @@ import ucar.nc2.NetcdfFile;
 import ucar.nc2.NetcdfFileWriteable;
 import ucar.nc2.Variable;
 
-import javax.swing.*;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.util.Random;
 
-public class EnIO {
+public class EnOI {
 
     Random rand = new Random();
     boolean first = true;
@@ -39,7 +30,7 @@ public class EnIO {
     DMatrixRMaj K = null;
     int callCount = 0;
     final int saveInterval = 10; // Number of calls between each time we save data to file
-    public EnIO(String prefix, AssimSettings as, int[] cageDims, double dxy, Measurements.MeasurementSet measSet) {
+    public EnOI(String prefix, AssimSettings as, int[] cageDims, double dxy, Measurements.MeasurementSet measSet) {
         this.filePrefix = prefix;
         this.cageDims = cageDims;
         this.dxy = dxy;
@@ -101,57 +92,13 @@ public class EnIO {
     public double[][] doAnalysis(double t, double[] x_f_array, AssimSettings as,
                                  InputDataNetcdf inData) {
 
-        int N=0,n=0, numel=cageDims[0]*cageDims[1]*cageDims[2];
         String file = filePrefix+"_ens.nc";
         boolean savingThisStep = false;
         if (first) {
             first = false;
             savingThisStep = true;
-            // Load ensemble and compute Kalman gain:
-            loadEnsemble(as.enOIEnsembleFile);
-            N = X.getNumCols();
-            n = X.getNumRows();
-            double N_d = (double)N;
-            double N_1 = Math.max((double)N-1., 1.);
+            calculateKalmanGain(t, as);
 
-            saveFile = SaveForEnOI.initializeFile(file, n, N, M.getNumRows(), M_allsensors.getNumRows(),
-                    as.nPar, "seconds", cageDims, dxy, measSet);
-
-            // Localization matrix:
-            DMatrixRMaj Kloc = getLocalizationMatrix(cageDims, M, numel, as.locDist, as.locZMultiplier);
-
-            // Set up R matrix:
-            double[] rval = new double[M.getNumRows()];
-            for (int i = 0; i < rval.length; i++) {
-                rval[i] = measSet.std*measSet.std;
-            }
-            DMatrixRMaj R = CommonOps_DDRM.diag(rval);
-
-            // Compute mean ensemble state:
-            DMatrixRMaj X_mean = CommonOps_DDRM.sumRows(X, null);
-            CommonOps_DDRM.scale(1./N_d, X_mean);
-            DMatrixRMaj e_n = new DMatrixRMaj(1, X.getNumCols());
-            e_n.fill(1.0);
-            DMatrixRMaj E_X = CommonOps_DDRM.mult(X_mean, e_n, null);
-            // Compute ensemble anomalies; A in Oke et al. (2010):
-            DMatrixRMaj theta = CommonOps_DDRM.subtract(X, E_X, null);
-            // Multiply anomalies by EnOI alpha:
-            CommonOps_DDRM.scale(as.enoiAlpha, theta);
-            // Compute M multiplied by ensemble anomalies; HA in Oke:
-            DMatrixRMaj omega = CommonOps_DDRM.mult(M, theta, null);
-
-            DMatrixRMaj p1 = CommonOps_DDRM.mult(omega, CommonOps_DDRM.transpose(omega, null), null);
-            DMatrixRMaj mR = new DMatrixRMaj(R);
-            CommonOps_DDRM.scale(N_1, mR);
-            DMatrixRMaj phi_inv = CommonOps_DDRM.add(p1, mR, null);
-            CommonOps_DDRM.invert(phi_inv);
-
-
-            // Calculate Kalman gain:
-            K = CommonOps_DDRM.elementMult(Kloc, CommonOps_DDRM.mult(CommonOps_DDRM.mult(theta, CommonOps_DDRM.transpose(omega,
-                    null), null), phi_inv, null), null);
-
-            SaveForEnOI.saveStaticVariables(saveFile, t, m2A(X), m2A(Kloc), m2A(K));
         } else {
             if (++callCount == saveInterval) {
                 saveFile = SaveForEnOI.openFile(file);
@@ -197,6 +144,62 @@ public class EnIO {
         return m2A_transpose(x_a);
     }
 
+    public DMatrixRMaj getKalmanGain() {
+        return K;
+    }
+
+    public void calculateKalmanGain(double t, AssimSettings as) {
+
+        String file = filePrefix+"_ens.nc";
+
+        int N=0,n=0, numel=cageDims[0]*cageDims[1]*cageDims[2];
+
+        // Load ensemble and compute Kalman gain:
+        loadEnsemble(as.enOIEnsembleFile);
+        N = X.getNumCols();
+        n = X.getNumRows();
+        double N_d = (double)N;
+        double N_1 = Math.max((double)N-1., 1.);
+
+
+        // Localization matrix:
+        DMatrixRMaj Kloc = getLocalizationMatrix(cageDims, M, numel, as.locDist, as.locZMultiplier);
+
+        // Set up R matrix:
+        double[] rval = new double[M.getNumRows()];
+        for (int i = 0; i < rval.length; i++) {
+            rval[i] = measSet.std*measSet.std;
+        }
+        DMatrixRMaj R = CommonOps_DDRM.diag(rval);
+
+        // Compute mean ensemble state:
+        DMatrixRMaj X_mean = CommonOps_DDRM.sumRows(X, null);
+        CommonOps_DDRM.scale(1./N_d, X_mean);
+        DMatrixRMaj e_n = new DMatrixRMaj(1, X.getNumCols());
+        e_n.fill(1.0);
+        DMatrixRMaj E_X = CommonOps_DDRM.mult(X_mean, e_n, null);
+        // Compute ensemble anomalies; A in Oke et al. (2010):
+        DMatrixRMaj theta = CommonOps_DDRM.subtract(X, E_X, null);
+        // Multiply anomalies by EnOI alpha:
+        CommonOps_DDRM.scale(as.enoiAlpha, theta);
+        // Compute M multiplied by ensemble anomalies; HA in Oke:
+        DMatrixRMaj omega = CommonOps_DDRM.mult(M, theta, null);
+
+        DMatrixRMaj p1 = CommonOps_DDRM.mult(omega, CommonOps_DDRM.transpose(omega, null), null);
+        DMatrixRMaj mR = new DMatrixRMaj(R);
+        CommonOps_DDRM.scale(N_1, mR);
+        DMatrixRMaj phi_inv = CommonOps_DDRM.add(p1, mR, null);
+        CommonOps_DDRM.invert(phi_inv);
+
+
+        // Calculate Kalman gain:
+        K = CommonOps_DDRM.elementMult(Kloc, CommonOps_DDRM.mult(CommonOps_DDRM.mult(theta, CommonOps_DDRM.transpose(omega,
+                null), null), phi_inv, null), null);
+
+        saveFile = SaveForEnOI.initializeFile(file, n, N, M.getNumRows(), M_allsensors.getNumRows(),
+                as.nPar, "seconds", cageDims, dxy, measSet);
+        SaveForEnOI.saveStaticVariables(saveFile, t, m2A(X), m2A(Kloc), m2A(K));
+    }
     public DMatrixRMaj getLocalizationMatrix(int[] dims, DMatrixRMaj M, int numel, double locDist, double locZMultiplier) {
         DMatrixRMaj Xloc1 = new DMatrixRMaj(M.getNumCols(), M.getNumRows());
 
