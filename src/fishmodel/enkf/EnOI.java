@@ -23,6 +23,8 @@ public class EnOI {
     private double dxy;
     Measurements.MeasurementSet measSet = null;
 
+    TwinExperimentData ted = null;
+
     NetcdfFileWriteable saveFile = null;
     DMatrixRMaj X = null;
     DMatrixRMaj M = null;
@@ -38,6 +40,11 @@ public class EnOI {
         M = Measurements.getMeasurementModelBjoroya(cageDims, 0, measSet, false);
         M_allsensors = Measurements.getMeasurementModelBjoroya(cageDims, 0, measSet, true);
 
+    }
+
+    public void loadTwinData(String path) {
+        ted = new TwinExperimentData(path);
+        System.out.println("EnOI: loaded twin experiment data from: "+path);
     }
 
     private DMatrixRMaj loadEnsembleFromFile(String path) {
@@ -109,8 +116,13 @@ public class EnOI {
 
         // Instantiate forecast state vector:
         DMatrixRMaj x_f = new DMatrixRMaj(x_f_array);
-        // Get measurements from the input data object:
-        double[] meas = inData.getO2Measurements();
+        double[] meas;
+        if (!as.useTwin) {
+            // Get measurements from the input data object:
+            meas = inData.getO2Measurements();
+        } else {
+            meas = ted.getMeasurements(t);
+        }
         // Get a list of which sensors to use for assimilation:
         int[] activeSensors = Measurements.getSensorsToAssimilateBjoroya();
         DMatrixRMaj d_all = new DMatrixRMaj(meas.length, 1);

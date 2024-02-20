@@ -38,11 +38,10 @@ public class EnsembleKF {
     }
 
     public double[][] doAnalysis(double t, double[][] dX, AssimSettings as,
-                                 InputDataNetcdf inData) {
+                                 InputDataNetcdf inData, String file) {
 
         int N = (as.useTwin ? dX.length-1: dX.length); // Set correct N corresponding to the ensemble X.
         //System.out.println("N = "+N);
-        String file = filePrefix+"_ens.nc";
         boolean savingThisStep = false;
         if (first) {
             first = false;

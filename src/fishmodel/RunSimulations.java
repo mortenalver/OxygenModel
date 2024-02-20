@@ -46,7 +46,7 @@ public class RunSimulations {
 
         // Save files:
         String saveDir = "./";
-        String simNamePrefix = "enkf_basic"; //"assim6_o2pert_lbeta_nopar_dropout";
+        String simNamePrefix = "test_enoi_twin"; //"assim6_o2pert_lbeta_nopar_dropout";
         String simNamePostfix = "";
 
         boolean doMPI = false; // Will be set to true if we are running is EnKF mode using MPI
@@ -57,6 +57,7 @@ public class RunSimulations {
         int rank = 0, N=1;
         MpiHandler mpi = null;
         EnsembleKF enKF = null;
+        EOFPerturbations eofPerturbations = null;
         EnOI enOI = null;
         try {
             mpi = new MpiHandler(args);
@@ -77,8 +78,8 @@ public class RunSimulations {
 
         // Simulation settings:
         boolean maskO2WhenSaving = false;
-        boolean varyAmbient = false; // Reduction in ambient values towards the rest of the farm
-        boolean decreasingCurrentFactor = false; // Model gradual decrease in current factor due to
+        boolean varyAmbient = true; // Reduction in ambient values towards the rest of the farm
+        boolean decreasingCurrentFactor = true; // Model gradual decrease in current factor due to
                                                 // increasing cage net biofouling
         boolean useCurrentMagic = false; // Use spatially variable current flow field
         CurrentMagicFields cmf = null;
@@ -88,15 +89,32 @@ public class RunSimulations {
 
         boolean use3dBalancedCurrent = false; // Use Balanced3DHydraulics
 
-        boolean useVerticalDist = false; // Use non-uniform vertical distribution (defined further down)
+        boolean useVerticalDist = true; // Use non-uniform vertical distribution (defined further down)
                                         // for non-feeding fish
 
         boolean useInstantaneousAmbientVals = true; // true to use ambient value time series, false to use daily averages
 
         //boolean includeHypoxiaAvoidance = true;     int checkAvoidanceInterval = 30, checkAvoidanceCount = 0;
 
+        int daysToAdd = 0;
+        if (args.length >= 1) {
+            for (int i=0; i<args.length; i++) {
+                if (args[i].startsWith("offset:")) {
+                    String lastPart = args[i].substring("offset:".length()).trim();
+                    try {
+                        daysToAdd = Integer.parseInt(lastPart);
+                        break;
+                    } catch (NumberFormatException e) {
+                        throw new RuntimeException(e);
+                    }
+                }
+            }
+
+        }
+
         // Simulation start time:
-        int initYear = 2022, initMonth = Calendar.JUNE, initDate = 27, initHour = 0, initMin = 0, initSec = 0;
+        int initYear = 2022, initMonth = Calendar.JUNE, initDate = 22, initHour = 0, initMin = 0, initSec = 0;
+        initDate += daysToAdd;
         double t_end = 24*3600;//1*24*3600; // Duration of simulation
         int nSim = 1; // Number of days to simulate (separate sims)
         int startAt = 0; // Set to >0 to skip one of more simulations, but count them in the sim numbering
@@ -106,7 +124,7 @@ public class RunSimulations {
         double depth = 25, totDepth = 25; // Cage size (m)
         double dxy = 2, dz = dxy; // Model resolution (m)
         double dt = .5 * dxy; // Time step (s)
-        int storeIntervalFeed = 360, storeIntervalInfo = 60;
+        int storeIntervalFeed = 600, storeIntervalInfo = 60;
         double fishMaxDepth = 20; // The maximum depth of the fish under non-feeding conditions
 
         double currentReductionFactor = (useCurrentMagic ? 1.0 : 0.8); // Multiplier for inside current
@@ -352,7 +370,8 @@ public class RunSimulations {
             double[][][] fishTmp = new double[fish.getNGroups()][1][1];
 
             SimpleDateFormat filenameForm = new SimpleDateFormat("dd_MM");
-            String filePrefix = simNamePrefix+filenameForm.format(startTime);
+            String datePart = filenameForm.format(startTime);
+            String filePrefix = simNamePrefix+datePart;
 
             // Establish file names to write data to:
             NetcdfFileWriteable ncfile = null;
@@ -360,6 +379,11 @@ public class RunSimulations {
             String ncfilePath = saveDir + filePrefix + simNamePostfix + (doMPI ? "_"+String.format("%02d", rank) : "")+".nc";
             String fishfilePath = saveDir + filePrefix + simNamePostfix + (doMPI ? "_"+String.format("%02d", rank) : "")+"_fish.nc";
             boolean firstStore3d = true, firstStoreScalars = true;
+
+            // If we are running an EnOI twin experiment, load the appropriate twin data file now:
+            if (!doMPI && as.useEnOI) {
+                enOI.loadTwinData(as.twinDataPathPrefix+datePart+"_fish.nc");
+            }
 
             double totFeedAdded = 0;
 
@@ -384,10 +408,21 @@ public class RunSimulations {
                     ambVal = new double[] {inData.getO2Ambient5(), inData.getO2Ambient10(), inData.getO2Ambient15()};
                     interpolateVertical(ambientValueO2, new double[] {5, 10, 15}, ambVal, cageDims[2], dz);
 
+
                     //currentSpeed = inData.getExtCurrentSpeed();
                     //currentDirection = inData.getExtCurrentDir();
                     double[] obsCurrentProfile = inData.getExtCurrentSpeedProfile();
                     double[] obsCurrentDirProfile = inData.getExtCurrentDirProfile();
+
+                    /*// FOR TWIN GENERATION
+                    for (int j = 0; j < ambientValueO2.length; j++) {
+                        ambientValueO2[j] = ambientValueO2[j] + 0.25;
+                    }
+                    for (int j = 0; j < obsCurrentDirProfile.length; j++) {
+                        obsCurrentDirProfile[j] = obsCurrentDirProfile[j] + 15.;
+                    }*/
+
+
                     double[] obsCurrentComp1 = new  double[obsCurrentProfile.length],
                             obsCurrentComp2 = new  double[obsCurrentProfile.length];
                     // Current directions are given as the direction the current flows towards, with
@@ -496,8 +531,15 @@ public class RunSimulations {
                 // twin is not to be perturbed.
                 if (doMPI && as.perturbThisMember) {
 
+                    if (as.eofPerturbations) {
+                        if (eofPerturbations == null) {
+                            eofPerturbations = new EOFPerturbations(as.eofPerturbationFile);
+                            eofPerturbations.setScaleFactors(dz, cageDims[2], as.eofSurfScaleFactor, as.eofReductionRate);
+                        }
+                        eofPerturbations.perturb3dField(o2);
+                    }
                     // Perturb anywhere: Repeat a given number of times:
-                    for (int allstatesrep=0; allstatesrep<as.allStatesNRep; allstatesrep++) {
+                    /*for (int allstatesrep=0; allstatesrep<as.allStatesNRep; allstatesrep++) {
                         // Perturb all states randomly:
                         // Pick a random point and a perturbation, and let it drop off by r^2
                         int pt1 = (int) Math.floor(cageDims[0] * Math.random()),
@@ -514,7 +556,7 @@ public class RunSimulations {
                                     else
                                         o2[ii][jj][kk] += perturbVal / (distance * distance);
                                 }
-                    }
+                    }*/
 
                     ambientO2_perturb = Util.updateGaussMarkov(ambientO2_perturb, as.ambientO2Beta, as.ambientO2Std, dt, rnd);
                     for (int j = 0; j < ambientValueO2.length; j++) {
@@ -588,7 +630,7 @@ public class RunSimulations {
                     if (isRoot) {
                         System.out.println("Calling EnKF");
                         long tic = System.currentTimeMillis();
-                        double[][] X_a = enKF.doAnalysis(t, X, as, inData);
+                        double[][] X_a = enKF.doAnalysis(t, X, as, inData, filePrefix+"_ens.nc");
                         long duration = System.currentTimeMillis() - tic;
                         if (duration > 1000L)
                             System.out.println("Analysis took "+(duration/1000L)+" seconds.");

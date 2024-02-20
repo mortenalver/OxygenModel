@@ -519,7 +519,7 @@ public class FullFarmSimulations {
                 // twin is not to be perturbed.
                 if (doMPI && as.perturbThisMember) {
 
-                    // Perturb anywhere: Repeat a given number of times:
+                    /*// Perturb anywhere: Repeat a given number of times:
                     for (int allstatesrep=0; allstatesrep<as.allStatesNRep*4; allstatesrep++) {
                         // Perturb all states randomly:
                         // Pick a random point and a perturbation, and let it drop off by r^2
@@ -537,7 +537,7 @@ public class FullFarmSimulations {
                                     else
                                         o2[ii][jj][kk] += perturbVal / (distance * distance);
                                 }
-                    }
+                    }*/
 
                     ambientO2_perturb = Util.updateGaussMarkov(ambientO2_perturb, as.ambientO2Beta, as.ambientO2Std, dt, rnd);
                     for (int j = 0; j < ambientValueO2.length; j++) {
@@ -608,7 +608,7 @@ public class FullFarmSimulations {
                     if (isRoot) {
                         System.out.println("Calling EnKF");
                         long tic = System.currentTimeMillis();
-                        double[][] X_a = enKF.doAnalysis(t, X, as, inData);
+                        double[][] X_a = enKF.doAnalysis(t, X, as, inData, filePrefix+"_ens.nc");
                         long duration = System.currentTimeMillis() - tic;
                         if (duration > 1000L)
                             System.out.println("Analysis took "+(duration/1000L)+" seconds.");

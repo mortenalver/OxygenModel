@@ -2,7 +2,7 @@ package fishmodel.enkf;
 
 public class AssimSettings {
 
-    public boolean useEnOI = false; // Use EnOI instead of EnKF. This value is disregarded if running in MPI mode.
+    public boolean useEnOI = true; // Use EnOI instead of EnKF. This value is disregarded if running in MPI mode.
     public boolean hybrid_EnKF_ENOI = false;
     public double hybrid_ENOI_weight = 0.5; // Relative weighting of ENOI K matrix in hybrid setup
     public String[] enOIEnsembleFile = new String[]{
@@ -22,12 +22,14 @@ public class AssimSettings {
     //public String enOIEnsembleFile = "C:\\Users\\alver\\Work\\BjoroyaSim\\enoitest_dr24_06.nc";
     public double enoiAlpha = 0.1;
 
-    public boolean useTwin = false; // If running EnKF, this variable is set to true if running a twin experiment
+    public boolean useTwin = true; // If running EnKF, this variable is set to true if running a twin experiment
+    public String twinDataPathPrefix = "twin";
+
     // where measurements are acquired from the last (N-1) parallel model
     public boolean perturbTwin = false;
     public boolean perturbThisMember = false; // Perturbations will be activated if we are running with EnKF and
     // unless this member is the twin model in a twin experiment setup.
-    public boolean dryRun = false; // If set to true, EnKF corrections will be computed, but not applied
+    public boolean dryRun = true; // If set to true, EnKF corrections will be computed, but not applied
 
     public boolean usePerturbations = !dryRun; // If false, no perturbations. IF true, perturbations will be activated where
     // appropriate (when running in MPI mode and if this process is not the twin model).
@@ -49,14 +51,18 @@ public class AssimSettings {
     public boolean ensembleInflation = false;
     public double ensembleInflationFactor = 1.05;
 
-    public double allStatesStd = 0.25*0.008;
-    public double allStatesMinDist = 8.;
-    public double allStatesDistMultiplier = 1./30.;
-    public int allStatesNRep = 6;
-    public double ambientO2Std = 0.*2.*0.25, ambientO2Beta = 0.2*0.05;
+    public double scaleAllPerturb = 1.0;
 
-    public double currentStd = 0.03, currentBeta = 0.2*0.05;
-    public double o2ConsStd = 0.15, o2ConsBeta = 0.2*0.05;
+    // EOF based perturbations:
+    public boolean eofPerturbations = true;
+    public String eofPerturbationFile = "eof_perturb.nc";
+    public double eofSurfScaleFactor = scaleAllPerturb*0.05;
+    public double eofReductionRate = 0.03;
+
+    public double ambientO2Std = 0.*scaleAllPerturb*0.25, ambientO2Beta = 0.2*0.05;
+
+    public double currentStd = scaleAllPerturb*0.03, currentBeta = 0.2*0.05;
+    public double o2ConsStd = scaleAllPerturb*0.15, o2ConsBeta = 0.2*0.05;
 
     // Parameter estimation:
     public int nPar = 1;
