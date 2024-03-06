@@ -18,7 +18,6 @@ public class EnOI {
 
     Random rand = new Random();
     boolean first = true;
-    String filePrefix;
     private int[] cageDims;
     private double dxy;
     Measurements.MeasurementSet measSet = null;
@@ -32,8 +31,7 @@ public class EnOI {
     DMatrixRMaj K = null;
     int callCount = 0;
     final int saveInterval = 10; // Number of calls between each time we save data to file
-    public EnOI(String prefix, AssimSettings as, int[] cageDims, double dxy, Measurements.MeasurementSet measSet) {
-        this.filePrefix = prefix;
+    public EnOI(AssimSettings as, int[] cageDims, double dxy, Measurements.MeasurementSet measSet) {
         this.cageDims = cageDims;
         this.dxy = dxy;
         this.measSet = measSet;
@@ -97,14 +95,13 @@ public class EnOI {
     }
 
     public double[][] doAnalysis(double t, double[] x_f_array, AssimSettings as,
-                                 InputDataNetcdf inData) {
+                                 InputDataNetcdf inData, String file) {
 
-        String file = filePrefix+"_ens.nc";
         boolean savingThisStep = false;
         if (first) {
             first = false;
             savingThisStep = true;
-            calculateKalmanGain(t, as);
+            calculateKalmanGain(t, as, file);
 
         } else {
             if (++callCount == saveInterval) {
@@ -160,9 +157,8 @@ public class EnOI {
         return K;
     }
 
-    public void calculateKalmanGain(double t, AssimSettings as) {
+    public void calculateKalmanGain(double t, AssimSettings as, String file) {
 
-        String file = filePrefix+"_ens.nc";
 
         int N=0,n=0, numel=cageDims[0]*cageDims[1]*cageDims[2];
 

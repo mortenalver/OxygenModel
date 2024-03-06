@@ -35,6 +35,7 @@ import ucar.nc2.NetcdfFileWriteable;
  */
 public class RunSimulations {
 
+    public static boolean makingTwin = false; // WARNING: If true, perturbations/noise will be added
     public static final double HYPOXIA_THRESHOLD = 6;
 
     public static LinearInterpolator interpol = new LinearInterpolator();
@@ -46,7 +47,7 @@ public class RunSimulations {
 
         // Save files:
         String saveDir = "./";
-        String simNamePrefix = "test_enoi_twin"; //"assim6_o2pert_lbeta_nopar_dropout";
+        String simNamePrefix = "enkf_nopar_twin"; //"assim6_o2pert_lbeta_nopar_dropout";
         String simNamePostfix = "";
 
         boolean doMPI = false; // Will be set to true if we are running is EnKF mode using MPI
@@ -68,7 +69,7 @@ public class RunSimulations {
             // TEST TEST TEST:
             AdvectPellets.disableMultiprocessing(); // No internal parallelization when running MPI
             //
-            if (as.usePerturbations && ((rank < N-1) || !as.useTwin || as.perturbTwin))
+            if (as.usePerturbations)
                 as.perturbThisMember = true;
         } catch (Throwable ex) {
             ex.printStackTrace();
@@ -255,7 +256,7 @@ public class RunSimulations {
         }
 
         if (!doMPI && as.useEnOI) {
-            enOI = new EnOI(simNamePrefix, as, cageDims, dxy, ms);
+            enOI = new EnOI(as, cageDims, dxy, ms);
         }
 
         // Set up initial perturbation and parameter values:
@@ -380,6 +381,11 @@ public class RunSimulations {
             String fishfilePath = saveDir + filePrefix + simNamePostfix + (doMPI ? "_"+String.format("%02d", rank) : "")+"_fish.nc";
             boolean firstStore3d = true, firstStoreScalars = true;
 
+            // If we are running an EnKF twin experiment and this is rank 0, load the appropriate twin data file now:
+            if (doMPI && (rank==0)) {
+                enKF.loadTwinData(as.twinDataPathPrefix+datePart+"_fish.nc");
+            }
+
             // If we are running an EnOI twin experiment, load the appropriate twin data file now:
             if (!doMPI && as.useEnOI) {
                 enOI.loadTwinData(as.twinDataPathPrefix+datePart+"_fish.nc");
@@ -414,13 +420,14 @@ public class RunSimulations {
                     double[] obsCurrentProfile = inData.getExtCurrentSpeedProfile();
                     double[] obsCurrentDirProfile = inData.getExtCurrentDirProfile();
 
-                    /*// FOR TWIN GENERATION
-                    for (int j = 0; j < ambientValueO2.length; j++) {
-                        ambientValueO2[j] = ambientValueO2[j] + 0.25;
+
+                    // FOR TWIN GENERATION
+                    if (makingTwin) {
+                        for (int j = 0; j < ambientValueO2.length; j++) {
+                            ambientValueO2[j] = ambientValueO2[j] + 0.2;
+                        }
                     }
-                    for (int j = 0; j < obsCurrentDirProfile.length; j++) {
-                        obsCurrentDirProfile[j] = obsCurrentDirProfile[j] + 15.;
-                    }*/
+
 
 
                     double[] obsCurrentComp1 = new  double[obsCurrentProfile.length],
@@ -527,9 +534,8 @@ public class RunSimulations {
 
                 o2Cons_perturb_r = 0.;
 
-                // Perturb if we are using MPI, except if we are using a twin, and this is the twin, and the
-                // twin is not to be perturbed.
-                if (doMPI && as.perturbThisMember) {
+                // Perturb if we are using MPI:
+                if ((doMPI && as.perturbThisMember) || makingTwin) {
 
                     if (as.eofPerturbations) {
                         if (eofPerturbations == null) {
@@ -568,13 +574,6 @@ public class RunSimulations {
                     }
                     o2Cons_perturb = Util.getGaussValue(as.o2ConsStd, rnd);//Util.updateGaussMarkov(o2Cons_perturb, as.o2ConsBeta, as.o2ConsStd, dt, rnd);
                     o2Cons_perturb_r = o2Cons_perturb;
-                } else if (as.useTwin && (rank == N-1)) {
-                    // This is the twin, introduce possible model error here.
-                    for (int j = 0; j < ambientValueO2.length; j++) {
-                        ambientValueO2_r[j] = ambientValueO2[j] + 0.25;
-
-                    }
-                    System.arraycopy(currentOffset, 0, currentOffset_r, 0, currentOffset.length);
                 } else {
                     // Copy ambientValueO2 and currentOffset without perturbations:
                     System.arraycopy(ambientValueO2, 0, ambientValueO2_r, 0, ambientValueO2.length);
@@ -640,9 +639,7 @@ public class RunSimulations {
                             mpi.distributeAnalysisFromRank0(X_a, o2, parVal, cageDims, as.nPar);
                         }
                     } else if (!as.dryRun && !as.isDropOutActive(t)) { // We only apply corrections if we are not doing a dry run and not in a dropout interval
-                        if (!as.useTwin || (rank < N-1)) {
-                            mpi.receiveAnalysisFromRank0(o2, parVal, cageDims, as.nPar);
-                        }
+                        mpi.receiveAnalysisFromRank0(o2, parVal, cageDims, as.nPar);
                     }
                 }
 
@@ -652,7 +649,7 @@ public class RunSimulations {
                     long tic = System.currentTimeMillis();
                     // Make state vector from o2 field:
                     double[] x_f = Util.reshapeArray(o2);
-                    double[][] x_a = enOI.doAnalysis(t, x_f, as, inData);
+                    double[][] x_a = enOI.doAnalysis(t, x_f, as, inData, filePrefix+"_ens.nc");
                     long duration = System.currentTimeMillis() - tic;
                     if (duration > 1000L)
                         System.out.println("Analysis took "+(duration/1000L)+" seconds.");

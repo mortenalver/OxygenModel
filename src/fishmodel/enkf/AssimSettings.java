@@ -23,13 +23,13 @@ public class AssimSettings {
     public double enoiAlpha = 0.1;
 
     public boolean useTwin = true; // If running EnKF, this variable is set to true if running a twin experiment
-    public String twinDataPathPrefix = "twin";
+    public String twinDataPathPrefix = "twin2";
 
     // where measurements are acquired from the last (N-1) parallel model
     public boolean perturbTwin = false;
     public boolean perturbThisMember = false; // Perturbations will be activated if we are running with EnKF and
     // unless this member is the twin model in a twin experiment setup.
-    public boolean dryRun = true; // If set to true, EnKF corrections will be computed, but not applied
+    public boolean dryRun = false; // If set to true, EnKF corrections will be computed, but not applied
 
     public boolean usePerturbations = !dryRun; // If false, no perturbations. IF true, perturbations will be activated where
     // appropriate (when running in MPI mode and if this process is not the twin model).
@@ -66,7 +66,7 @@ public class AssimSettings {
 
     // Parameter estimation:
     public int nPar = 1;
-    double parStd0 = 0.002;
+    double parStd0 = 0.*0.002;
     double par4Std = 0.25;
     public double[] parStd = new double[] {parStd0};//, parStd0, parStd0};
 

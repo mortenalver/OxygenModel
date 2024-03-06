@@ -44,7 +44,6 @@ public class SaveForEnKF {
             createTimeVariable(ncfile, timeUnits);
             createVariable(ncfile, "X", "time", "yc", "xc");
             createVariable(ncfile, "X_a", "time", "yc", "xc");
-            createVariable(ncfile, "X_t", "time", "xc");
             createVariable(ncfile, "M", "time", "xc", "zc");
             createVariable(ncfile, "deviation", "time", "yc", "zc");
             createVariable(ncfile, "deviation_exact", "time", "yc", "zc");
@@ -149,7 +148,7 @@ public class SaveForEnKF {
     }
 
     public static void saveEnKFVariables(NetcdfFileWriteable ncfile, double time, double[][] X, double[][] X_a,
-                                     double[] X_twin, double[][] M, double[][] dev, double[][] dev_exact,
+                                     double[][] M, double[][] dev, double[][] dev_exact,
                                      double[][] dev_all_exact, double[][] K, double[][] Xloc) {
         try {
             Dimension tDim = ncfile.findDimension("time"),
@@ -166,8 +165,6 @@ public class SaveForEnKF {
 
             save2DVariable(ncfile,  "X", tDim.getLength()-1, X, yDim, xDim);
             save2DVariable(ncfile,  "X_a", tDim.getLength()-1, X_a, yDim, xDim);
-            if (X_twin != null)
-                save1DVariable(ncfile,  "X_t", tDim.getLength()-1, X_twin, xDim);
 
             save2DVariable(ncfile,  "M", tDim.getLength()-1, M, xDim, zDim);
             save2DVariable(ncfile,  "deviation", tDim.getLength()-1, dev, yDim, zDim);

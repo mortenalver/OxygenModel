@@ -19,6 +19,7 @@ public class EnsembleKF {
     private int[] cageDims;
     private double dxy;
     Measurements.MeasurementSet measSet = null;
+    TwinExperimentData ted = null;
     DMatrixRMaj M = null;
     DMatrixRMaj M_allsensors = null;
     int callCount = 0;
@@ -37,10 +38,15 @@ public class EnsembleKF {
 
     }
 
+    public void loadTwinData(String path) {
+        ted = new TwinExperimentData(path);
+        System.out.println("EnKF: loaded twin experiment data from: "+path);
+    }
+
     public double[][] doAnalysis(double t, double[][] dX, AssimSettings as,
                                  InputDataNetcdf inData, String file) {
 
-        int N = (as.useTwin ? dX.length-1: dX.length); // Set correct N corresponding to the ensemble X.
+        int N = dX.length; // Set correct N corresponding to the ensemble X.
         //System.out.println("N = "+N);
         boolean savingThisStep = false;
         if (first) {
@@ -50,8 +56,9 @@ public class EnsembleKF {
             savingThisStep = true;
 
             if (as.hybrid_EnKF_ENOI) {
-                enOI = new EnOI(filePrefix+"_enoi", as, cageDims, dxy, measSet);
-                enOI.calculateKalmanGain(t, as);
+                String enoiFile = file.substring(0, file.length()-("_ens.nc".length()))+"_enoi.nc";
+                enOI = new EnOI(as, cageDims, dxy, measSet);
+                enOI.calculateKalmanGain(t, as, enoiFile);
                 K_enOI = enOI.getKalmanGain();
                 System.out.println("K_enOI: "+K_enOI.getNumRows()+" x "+K_enOI.getNumCols());
 
@@ -66,64 +73,43 @@ public class EnsembleKF {
 
         // Ensemble state:
         DMatrixRMaj X = CommonOps_DDRM.transpose(new DMatrixRMaj(dX), null);
-        DMatrixRMaj X_twin = null;
 
         // Measurements: There are two main modes of operation. If "includeTwin" is True, we are obtaining measuremens
-        // from a "twin" model running parallel to the ensemble. The set of states to measure is decided
-        // by the measurement model provided by the measurements module.
+        // from a "twin", loaded from a previous output file (through TwinExperimentData).
         // If "useTwin" is False, we are using measurements loaded from file by the simInputsNetcdf module.
         DMatrixRMaj D=null, D_exact=null, D_all_exact = null;
-
+        double[] meas;
         if (as.useTwin) {
-            // Extract the first N-1 members as the ensemble, and the last as the twin:
-            DMatrixRMaj X_ens = new DMatrixRMaj(X.getNumRows(),X.getNumCols()-1);
-            CommonOps_DDRM.extract(X, 0, X.getNumRows(), 0,X.getNumCols()-1, X_ens);
-            X_twin = new DMatrixRMaj(X.getNumRows(),1);
-            CommonOps_DDRM.extract(X, 0, X.getNumRows(), X.getNumCols()-1,X.getNumCols(), X_twin);
-            X = X_ens; // X now consists of the non-twin members
             // Get measurements from the twin:
-            DMatrixRMaj d = CommonOps_DDRM.mult(M, X_twin, null);
-            // Set up matrix with perturbed measurements for all ensemble members:
-            DMatrixRMaj e_n = new DMatrixRMaj(1, X.getNumCols());
-            e_n.fill(1.0);
-            D = CommonOps_DDRM.mult(d, e_n, null);
-            D_exact = D.copy(); // Store the unperturbed measurement matrix
-            for (int i=0; i<D.getNumRows(); i++)
-                for (int j=0; j<D.getNumCols(); j++)
-                    D.add(i,j, measSet.std*rand.nextGaussian()); // Add gaussian noise according to measurement uncertainty
-            // Get a record of all measurements (not just assimilated sensors):
-            d = CommonOps_DDRM.mult(M_allsensors, X_twin, null);
-            D_all_exact = CommonOps_DDRM.mult(d, e_n, null);
-
-
+            meas = ted.getMeasurements(t);
+        } else {
+            meas = inData.getO2Measurements();
         }
-        else {
-            // Keep the entire X matrix, and let X_twin stay null. Get measurements from the input data object:
-            double[] meas = inData.getO2Measurements();
-            // Get a list of which sensors to use for assimilation:
-            int[] activeSensors = Measurements.getSensorsToAssimilateBjoroya();
 
-            DMatrixRMaj d = new DMatrixRMaj(activeSensors.length, 1);
-            for (int i = 0; i < activeSensors.length; i++) {
-                d.set(i, 0, meas[activeSensors[i]]);
-            }
-            // Set up matrix with perturbed measurements for all ensemble members:
-            DMatrixRMaj e_n = new DMatrixRMaj(1, X.getNumCols());
-            e_n.fill(1.0);
-            D = CommonOps_DDRM.mult(d, e_n, null);
-            D_exact = D.copy(); // Store the unperturbed measurement matrix
-            for (int i=0; i<D.getNumRows(); i++)
-                for (int j=0; j<D.getNumCols(); j++)
-                    D.add(i,j, measSet.std*rand.nextGaussian()); // Add gaussian noise according to measurement uncertainty
-            //System.out.println("D:"); System.out.println(D);
+        // Get a list of which sensors to use for assimilation:
+        int[] activeSensors = Measurements.getSensorsToAssimilateBjoroya();
 
-            // Get a record of all measurements (not just assimilated sensors):
-            d = new DMatrixRMaj(meas.length, 1);
-            for (int i = 0; i < meas.length; i++) {
-                d.set(i, 0, meas[i]);
-            }
-            D_all_exact = CommonOps_DDRM.mult(d, e_n, null);
+        DMatrixRMaj d = new DMatrixRMaj(activeSensors.length, 1);
+        for (int i = 0; i < activeSensors.length; i++) {
+            d.set(i, 0, meas[activeSensors[i]]);
         }
+        // Set up matrix with perturbed measurements for all ensemble members:
+        DMatrixRMaj e_n = new DMatrixRMaj(1, X.getNumCols());
+        e_n.fill(1.0);
+        D = CommonOps_DDRM.mult(d, e_n, null);
+        D_exact = D.copy(); // Store the unperturbed measurement matrix
+        for (int i=0; i<D.getNumRows(); i++)
+            for (int j=0; j<D.getNumCols(); j++)
+                D.add(i,j, measSet.std*rand.nextGaussian()); // Add gaussian noise according to measurement uncertainty
+        //System.out.println("D:"); System.out.println(D);
+
+        // Get a record of all measurements (not just assimilated sensors):
+        d = new DMatrixRMaj(meas.length, 1);
+        for (int i = 0; i < meas.length; i++) {
+            d.set(i, 0, meas[i]);
+        }
+        D_all_exact = CommonOps_DDRM.mult(d, e_n, null);
+
 
 
         double N_d = (double)N;
@@ -142,8 +128,6 @@ public class EnsembleKF {
         DMatrixRMaj X_mean = CommonOps_DDRM.sumRows(X, null);
         CommonOps_DDRM.scale(1./N_d, X_mean);
         //System.out.println("X_mean: "+X_mean.getNumRows()+"x"+X_mean.getNumCols());
-        DMatrixRMaj e_n = new DMatrixRMaj(1, X.getNumCols());
-        e_n.fill(1.0);
         DMatrixRMaj E_X = CommonOps_DDRM.mult(X_mean, e_n, null);
 
         // Compute deviations from mean state:
@@ -169,10 +153,7 @@ public class EnsembleKF {
         DMatrixRMaj deviations = CommonOps_DDRM.subtract(D, MX, null);
         DMatrixRMaj dev_exact = CommonOps_DDRM.subtract(D_exact, MX, null);
         DMatrixRMaj dev_all_exact = CommonOps_DDRM.subtract(D_all_exact, MX_allsensors, null);
-        //System.out.println("Deviations:");
-        //System.out.println(deviations);
-        //System.out.println("Dev exact:");
-        //System.out.println(dev_exact);
+
 
         DMatrixRMaj Kloc1 = getLocalizationMatrix(cageDims, M, numel, as.locDist, as.locZMultiplier);
 
@@ -229,8 +210,7 @@ public class EnsembleKF {
 
         // Save ensemble state:
         if (savingThisStep) {
-            SaveForEnKF.saveEnKFVariables(enKFFile, t, m2A(X), m2A(X_a),
-                    (X_twin != null ? m2A_1d(X_twin) : null), m2A(M),
+            SaveForEnKF.saveEnKFVariables(enKFFile, t, m2A(X), m2A(X_a), m2A(M),
                     m2A(deviations), m2A(dev_exact), m2A(dev_all_exact), m2A(K), m2A(Kloc1));
             try {
                 enKFFile.close();
