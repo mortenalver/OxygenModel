@@ -13,14 +13,11 @@ package fishmodel;
 import fishmodel.enkf.*;
 import fishmodel.hydraulics.Balanced3DHydraulics;
 import fishmodel.hydraulics.SimpleTankHydraulics;
-import fishmodel.pellets.*;
-
-import java.io.File;
-import java.io.IOException;
-import java.text.NumberFormat;
-import java.text.SimpleDateFormat;
-import java.util.*;
-
+import fishmodel.hydraulics.StationaryTankFlow;
+import fishmodel.pellets.AdvectPellets;
+import fishmodel.pellets.IngestionAndO2Tempprofile;
+import fishmodel.pellets.PelletSpreaderModel;
+import fishmodel.pellets.SimpleFish;
 import fishmodel.hydraulics.CurrentMagicFields;
 import fishmodel.sim.InputDataNetcdf;
 import org.apache.commons.math3.analysis.interpolation.LinearInterpolator;
@@ -28,14 +25,22 @@ import org.apache.commons.math3.analysis.polynomials.PolynomialSplineFunction;
 import save.SaveNetCDF;
 import ucar.nc2.NetcdfFileWriteable;
 
+import java.io.File;
+import java.io.IOException;
+import java.text.NumberFormat;
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
+import java.util.Date;
+import java.util.Locale;
+import java.util.Random;
+
 
 /**
  *
  * @author malv
  */
-public class RunSimulations {
+public class TankSimulation {
 
-    public static boolean makingTwin = false; // WARNING: If true, perturbations/noise will be added
     public static final double HYPOXIA_THRESHOLD = 6;
 
     public static LinearInterpolator interpol = new LinearInterpolator();
@@ -47,46 +52,16 @@ public class RunSimulations {
 
         // Save files:
         String saveDir = "./";
-        String simNamePrefix = "run_2.4";
+        String simNamePrefix = "tanktest4";
         String simNamePostfix = "";
 
-        boolean doMPI = false; // Will be set to true if we are running is EnKF mode using MPI
-        AssimSettings as = new AssimSettings(); // Settings related to the EnKF are gathered in AssimSettings
-        if (as.dryRun)
-            simNamePrefix += "_dr";
-
-        int rank = 0, N=1;
-        MpiHandler mpi = null;
-        EnsembleKF enKF = null;
-        EOFPerturbations eofPerturbations = null;
-        EnOI enOI = null;
-        try {
-            mpi = new MpiHandler(args);
-            System.out.println("rank="+mpi.getRank()+", N="+mpi.getN());
-            rank = mpi.getRank();
-            N = mpi.getN();
-            doMPI = true;
-            // TEST TEST TEST:
-            AdvectPellets.disableMultiprocessing(); // No internal parallelization when running MPI
-            //
-            if (as.usePerturbations)
-                as.perturbThisMember = true;
-        } catch (Throwable ex) {
-            ex.printStackTrace();
-            System.out.println("Not doing MPI");
-        }
-        boolean isRoot = (rank==0); // For convenience, isRoot tells us if this is the rank 0 process.
 
         // Simulation settings:
         boolean maskO2WhenSaving = false;
-        boolean varyAmbient = true; // Reduction in ambient values towards the rest of the farm
         boolean decreasingCurrentFactor = true; // Model gradual decrease in current factor due to
                                                 // increasing cage net biofouling
-        boolean useCurrentMagic = false; // Use spatially variable current flow field
-        CurrentMagicFields cmf = null;
-        if (useCurrentMagic) {
-            cmf = new CurrentMagicFields("C:/Users/alver/OneDrive - NTNU/prosjekt/O2_Bjørøya/currentmagic/currents_bjoroya_2m.nc");
-        }
+
+        StationaryTankFlow tankFlow = new StationaryTankFlow("C:\\Users\\alver\\OneDrive - NTNU\\prosjekt\\AQUAEXCEL3\\particleTransport\\inrae_mod_max_3d_4.nc");
 
         boolean use3dBalancedCurrent = false; // Use Balanced3DHydraulics
 
@@ -116,26 +91,22 @@ public class RunSimulations {
         // Simulation start time:
         int initYear = 2022, initMonth = Calendar.JUNE, initDate = 27, initHour = 0, initMin = 0, initSec = 0;
         initDate += daysToAdd;
-        double t_end = 24*3600;//1*24*3600; // Duration of simulation
+        double t_end = 15*60;//1*24*3600; // Duration of simulation
         int nSim = 1; // Number of days to simulate (separate sims)
         int startAt = 0; // Set to >0 to skip one of more simulations, but count them in the sim numbering
 
         // Common settings:
-        double rad = 25;
-        double depth = 25, totDepth = 25; // Cage size (m)
-        double dxy = 2, dz = dxy; // Model resolution (m)
+        double rad = 3;
+        double depth = 1, totDepth = 1; // Cage size (m)
+        double dxy = 0.1, dz = dxy; // Model resolution (m)
         double dt = .5 * dxy; // Time step (s)
-        int storeIntervalFeed = 600, storeIntervalInfo = 60;
+        int storeIntervalFeed = 60, storeIntervalInfo = 60;
         double fishMaxDepth = 20; // The maximum depth of the fish under non-feeding conditions
 
-        double currentReductionFactor = (useCurrentMagic ? 1.0 : 0.8); // Multiplier for inside current
-                                                                    // as function of outside
+        double currentReductionFactor = 1.0; // Multiplier for inside current as function of outside
 
         // Environmental conditions:
-        double currentSpeedInit = 2*0.04; // External current speed (m/s)
         double T_w = 14; double avO2 = 9; // mg / l
-        //double T_w = 16; double avO2 = 8*0.9612; // mg / l
-        //double T_w = 12; double avO2 = 8*1.0418; // mg / l
 
         // Oxygen diffusion constant (values updated further down)
         double diffKappaO2 = 0.1, diffKappaO2Z = 0.1;
@@ -144,7 +115,7 @@ public class RunSimulations {
         double[] currentOffset_r = new double[] {0,0,0}; // Perturbed global current vector
 
         // Fish setup (N, mean weight and std.dev weight):
-        double nFishBjoroya = 169821; // Estimated number of individuals in experimental period (source: FishTalk data)
+        double nFishTank = 150; // Estimated number of individuals in experimental period (source: FishTalk data)
         double meanWeight = 2869.5; // Estimated mean weight in experimental period (source: FishTalk data)
         double[] wFish = new double[] {meanWeight, 0.2*meanWeight};
         
@@ -174,16 +145,13 @@ public class RunSimulations {
         boolean[][][] mask = null;
         mask = CageMasking.circularMasking(cageDims, dxy, rad, false); // null
 
-        boolean useWalls = false;
+        boolean useWalls = true;
         System.out.println("Domain dimensions: ("+cageDims[0]+", "+cageDims[1]+", "+cageDims[2]+")");
 
         // Feeding setup:
-        int[][] feedingPos = new int[][] {{cageDims[0]/2, cageDims[1]/2}};
         // Feeding periods (start/end in s):
         // Fra Eskil (Bjørøya): måltidene varte fra ca. kl. 07:30-17:30, i gjennomsnitt.
-        int[][] feedingPeriods = new int[][] {{27000, 63000}, {86400+27000, 86400+63000}, {2*86400+27000, 2*86400+63000},
-                {3*86400+27000, 3*86400+63000}, {4*86400+27000, 4*86400+63000}, {5*86400+27000, 5*86400+63000},
-                {6*86400+27000, 6*86400+63000}, {7*86400+27000, 7*86400+63000}};
+        int[][] feedingPeriods = new int[][] {{120, 3600}};
         int nPeriods = feedingPeriods.length;
         for (int i=0; i<nPeriods; i++) {
             System.out.println("Feeding period "+(i+1)+": "+feedingPeriods[i][0]+" to "+feedingPeriods[i][1]);
@@ -202,14 +170,14 @@ public class RunSimulations {
         }
 
         // Determine number of fish, and feeding rate:
-        double nFish = nFishBjoroya;
+        double nFish = nFishTank;
         System.out.println("N fish = "+nFish);
         double nominalFeedingRate = 2900.*1000/(10*3600); // Approximate feeding over 10 hours based on FishTalk data
         double feedingRateMult = 0; // Set each timestep
         System.out.println("Feeding rate = "+nominalFeedingRate);
 
         // Oxygen sensor positions:
-        Measurements.MeasurementSet ms = Measurements.setupSensorPositionsBjoroya(cageDims, dxy, dz, rad);
+        Measurements.MeasurementSet ms = Measurements.setupSensorPositionsTank(cageDims, dxy, dz, rad);
         String[] o2Names = ms.names;
         int[][] o2Pos = ms.pos;
         // List O2 sensor positions and which are masked / not masked:
@@ -250,22 +218,7 @@ public class RunSimulations {
             ambientValueO2[i] = avO2;
         }
 
-        // If we are running in EnKF mode, let rank 0 initialize the EnKF class:
-        if (doMPI && (rank==0)) {
-            enKF = new EnsembleKF(simNamePrefix, cageDims, as.nPar, dxy, ms);
-        }
 
-        if (!doMPI && as.useEnOI) {
-            enOI = new EnOI(as, cageDims, dxy, ms);
-        }
-
-        // Set up initial perturbation and parameter values:
-        double ambientO2_perturb = 0;
-        double[] current_perturb = new double[2];
-        double o2Cons_perturb = 0; // Relative perturbation to total oxygen consumption to be updated per time step
-        double o2Cons_perturb_r = 0; // The perturbation to apply at this particular time step - may be set
-            // equal to o2Cons_perturb, or to the sum of o2Cons_perturb and an estimated consumption parameter.
-        double[] parVal = new double[as.nPar];
 
         // Initialize number formatter:
         NumberFormat nf1 = NumberFormat.getNumberInstance(Locale.ENGLISH);
@@ -305,18 +258,6 @@ public class RunSimulations {
 
             AdvectPellets ap = new AdvectPellets();
             AdvectPellets apOx = new AdvectPellets();
-            if (varyAmbient) {
-                apOx.setVaryAmbient(true, affinityProfile);
-
-            }
-
-            // Initialize environmental input data:
-            //String inDataFile = "C:/Users/alver/OneDrive - NTNU/prosjekt/O2_Bjørøya/bjoroya_data.nc";
-            String inDataFile = "C:/Users/alver/OneDrive - NTNU/prosjekt/O2_Bjørøya/bjoroya_data.nc";
-            if (!(new File(inDataFile)).exists())
-                inDataFile = "bjoroya_data.nc";
-            InputDataNetcdf inData = new InputDataNetcdf(inDataFile, useInstantaneousAmbientVals);
-            inData.setStartTime(startTime);
 
 
             // Format a unit string for the time variable to save to NetCDF giving the initial time:
@@ -338,12 +279,10 @@ public class RunSimulations {
             double outFlow = 0., outFlow_net = 0.;
 
             // Initialize O2 field based on first ambient values:
-            double[] ambVal = new double[] {inData.getO2Ambient5(), inData.getO2Ambient10(), inData.getO2Ambient15()};
-            interpolateVertical(ambientValueO2, new double[] {5, 10, 15}, ambVal, cageDims[2], dz);
             for (int i=0; i<cageDims[0]; i++)
                 for (int j=0; j<cageDims[1]; j++)
                     for (int k=0; k<cageDims[2]; k++) {
-                        o2[i][j][k] = ambientValueO2[k];
+                        o2[i][j][k] = avO2;
                     }
 
             // Setup of surface feeding:
@@ -351,19 +290,27 @@ public class RunSimulations {
             double[][] fTemp = new double[cageDims[0]][cageDims[1]];
 
             double[][] surfFeed = new double[cageDims[0]][cageDims[1]];
-            for (int i=0; i<feedingPos.length; i++) {
-                PelletSpreaderModel.setPelletDist(fTemp, feedingPos[i][0], feedingPos[i][1], dxy, 0, 35, 0, true, windSpeed, null);
-                // Add to total distribution:
-                for (int ii=0; ii<surfFeed.length; ii++)
-                    for (int jj = 0; jj < surfFeed[ii].length; jj++) {
-                        surfFeed[ii][jj] = surfFeed[ii][jj] + fTemp[ii][jj];
+            int nCells = 0;
+            int centerX = cageDims[0]/2, centerY = cageDims[1]/2;
+            for (int i=0; i<surfFeed.length; i++)
+                for (int j=0; j<surfFeed[i].length; j++) {
+                    if (mask[i][j][0]) {
+                        double dist = Math.sqrt((double)(i-centerX)*(double)(i-centerX)
+                                + (double)(j-centerY)*(double)(j-centerY));
+                        if (dist < 5) {
+                            surfFeed[i][j] = 1;
+                            nCells++;
+                        }
                     }
-            }
-
-            for (int i=0; i<fTemp.length; i++)
-                for (int j=0; j<fTemp[i].length; j++) {
-                    feedingRate[i][j][0] = fTemp[i][j];
                 }
+            double divideBy = (double)nCells;
+            for (int i=0; i<surfFeed.length; i++)
+                for (int j=0; j<surfFeed[i].length; j++) {
+                    if (mask[i][j][0]) {
+                        feedingRate[i][j][0] = surfFeed[i][j]/divideBy;
+                    }
+                }
+
             sourceTerm = feedingRate;
 
             // Initialize simple (grouped) fish model:
@@ -377,26 +324,13 @@ public class RunSimulations {
             // Establish file names to write data to:
             NetcdfFileWriteable ncfile = null;
             NetcdfFileWriteable fishfile = null;
-            String ncfilePath = saveDir + filePrefix + simNamePostfix + (doMPI ? "_"+String.format("%02d", rank) : "")+".nc";
-            String fishfilePath = saveDir + filePrefix + simNamePostfix + (doMPI ? "_"+String.format("%02d", rank) : "")+"_fish.nc";
+            String ncfilePath = saveDir + filePrefix + simNamePostfix +".nc";
+            String fishfilePath = saveDir + filePrefix + simNamePostfix +"_fish.nc";
             boolean firstStore3d = true, firstStoreScalars = true;
 
-            // If we are running an EnKF twin experiment and this is rank 0, load the appropriate twin data file now:
-            if (doMPI && (rank==0)) {
-                enKF.loadTwinData(as.twinDataPathPrefix+datePart+"_fish.nc");
-            }
-
-            // If we are running an EnOI twin experiment, load the appropriate twin data file now:
-            if (!doMPI && as.useEnOI) {
-                enOI.loadTwinData(as.twinDataPathPrefix+datePart+"_fish.nc");
-            }
 
             double totFeedAdded = 0;
 
-            double currentDirection = 90;
-            double currentSpeed = currentSpeedInit;
-            double f_currentDir = Math.exp(-0.01*dt); // For simulating Gauss-Markov process
-            double sigma_currentDir = 10;
 
             double t = 0;
             int n_steps = (int) (t_end / dt);
@@ -406,91 +340,6 @@ public class RunSimulations {
                 //System.out.println("t = "+t);
                 double tMin = t / 60;
 
-                if (inData.advance(t) || (i==0)) {
-
-                    double[] tempVal = {inData.getTemperature5(), inData.getTemperature10(), inData.getTemperature15()};
-                    //tempVal[0] = 18; tempVal[1] = 10; tempVal[2] = 2;
-                    interpolateVertical(ambientTemp, new double[] {5, 10, 15}, tempVal, cageDims[2], dz);
-                    ambVal = new double[] {inData.getO2Ambient5(), inData.getO2Ambient10(), inData.getO2Ambient15()};
-                    interpolateVertical(ambientValueO2, new double[] {5, 10, 15}, ambVal, cageDims[2], dz);
-
-
-                    //currentSpeed = inData.getExtCurrentSpeed();
-                    //currentDirection = inData.getExtCurrentDir();
-                    double[] obsCurrentProfile = inData.getExtCurrentSpeedProfile();
-                    double[] obsCurrentDirProfile = inData.getExtCurrentDirProfile();
-
-
-                    // FOR TWIN GENERATION
-                    if (makingTwin) {
-                        for (int j = 0; j < ambientValueO2.length; j++) {
-                            ambientValueO2[j] = ambientValueO2[j] + 0.2;
-                        }
-                    }
-
-
-
-                    double[] obsCurrentComp1 = new  double[obsCurrentProfile.length],
-                            obsCurrentComp2 = new  double[obsCurrentProfile.length];
-                    // Current directions are given as the direction the current flows towards, with
-                    // 0 degrees being north and 90 degrees being east. Verified by comparing histograms
-                    // with the textual descriptions in the report by Aqua Kompetanse.
-                    // x component: speed*sin(direction)
-                    // y component: speed*cos(direction)
-                    for (int j = 0; j < obsCurrentComp1.length; j++) {
-                        double currentReductionFactorHere = currentReductionFactor;
-                        // If we are using 3D balanced currents, use a factor of 1 here,
-                        // so we keep the original ambient currents. The reduction factor is instead
-                        // taken into account when the 3D field is calculated.
-                        if (use3dBalancedCurrent)
-                            currentReductionFactorHere = 1.0;
-
-                        //currentReductionFactorHere *= Math.min(1.0, (1.+12.*(obsCurrentProfile[j]-0.06))); // TEST
-                        obsCurrentComp1[j] = currentReductionFactorHere*
-                                obsCurrentProfile[j]*Math.sin(obsCurrentDirProfile[j]*Math.PI/180.);
-                        obsCurrentComp2[j] = currentReductionFactorHere*
-                                obsCurrentProfile[j]*Math.cos(obsCurrentDirProfile[j]*Math.PI/180.);
-                    }
-
-                    double[] obsCurrentDepths = inData.getCurrentDepths();
-                    double[] interpProfile1 = new double[cageDims[2]],
-                            interpProfile2 = new double[cageDims[2]];
-                    interpolateVertical(interpProfile1, obsCurrentDepths, obsCurrentComp1, cageDims[2], dz);
-                    interpolateVertical(interpProfile2, obsCurrentDepths, obsCurrentComp2, cageDims[2], dz);
-
-                    if (!useCurrentMagic) {
-                        for (int j = 0; j < interpProfile1.length; j++) {
-                            //double speedHereNow = Math.sqrt(interpProfile1[j]*interpProfile1[j] + interpProfile2[j]*interpProfile2[j]);
-                            //currentProfile[j][0] = 0;//0.1317*speedHereNow;
-                            //currentProfile[j][1] = 0;//0.9913*speedHereNow;
-                            currentProfile[j][0] = interpProfile1[j];
-                            currentProfile[j][1] = interpProfile2[j];
-                            currentProfile[j][2] = 0.;
-                        }
-                        // Update current field using the new profile:
-                        if (!use3dBalancedCurrent)
-                            // Create uniform current field for each layer:
-                            SimpleTankHydraulics.getProfileHydraulicField(hydro, cageDims, currentProfile);
-                        else
-                            // Create a balanced 3D current field based on the current profile:
-                            //Balanced3DHydraulics.getBjoroyaHydraulicField(cageDims, dxy, rad,
-                            //        currentReductionFactor, currentProfile, hydro);
-                            Balanced3DHydraulics.getTurbulentHydraulicField(cageDims, dxy, rad,
-                                    currentReductionFactor, currentProfile, hydro);
-                            //Balanced3DHydraulics.stats(hydro);
-                    }
-                    else {
-                        double[] lDirections = new double[cageDims[2]],
-                                lSpeeds = new double[cageDims[2]];
-                        for (int j = 0; j < cageDims[2]; j++) {
-                            lSpeeds[j] = Math.sqrt(interpProfile1[j]*interpProfile1[j] + interpProfile2[j]*interpProfile2[j]);
-                            lDirections[j] = Math.atan2(interpProfile1[j], interpProfile2[j])*180./Math.PI;
-
-                        }
-                        cmf.setCurrentField(hydro, lSpeeds, lDirections);
-
-                    }
-                }
 
                 // Update variable current speed offset:
                 currentOffset[0] = 0.;//currentReductionFactor*currentSpeed*Math.cos(currentDirection*Math.PI/180.);
@@ -532,82 +381,8 @@ public class RunSimulations {
 
                 totFeedAdded += dt * feedingRateMult;
 
-                o2Cons_perturb_r = 0.;
 
                 double maxval = 0;
-                // Perturb if we are using MPI:
-                if ((doMPI && as.perturbThisMember) || makingTwin) {
-
-
-                    if (as.eofPerturbations) {
-                        if (eofPerturbations == null) {
-                            eofPerturbations = new EOFPerturbations(as.eofPerturbationFile);
-                            eofPerturbations.setScaleFactors(dz, cageDims[2], as.eofSurfScaleFactor, as.eofReductionRate);
-                        }
-                        eofPerturbations.perturb3dField(o2);
-                    }
-                    // Perturb anywhere: Repeat a given number of times:
-                    /*for (int allstatesrep=0; allstatesrep<as.allStatesNRep; allstatesrep++) {
-                        // Perturb all states randomly:
-                        // Pick a random point and a perturbation, and let it drop off by r^2
-                        int pt1 = (int) Math.floor(cageDims[0] * Math.random()),
-                                pt2 = (int) Math.floor(cageDims[1] * Math.random()),
-                                pt3 = (int) Math.floor(cageDims[2] * Math.random());
-                        double perturbVal = as.allStatesStd * rnd.nextGaussian();
-                        for (int ii = 0; ii < cageDims[0]; ii++)
-                            for (int jj = 0; jj < cageDims[1]; jj++)
-                                for (int kk = 0; kk < cageDims[2]; kk++) {
-                                    double distance = (dxy * Math.sqrt((ii - pt1) * (ii - pt1) + (jj - pt2) * (jj - pt2) + (kk - pt3) * (kk - pt3)) *
-                                            as.allStatesDistMultiplier) - as.allStatesMinDist;
-                                    if (distance <= 1)
-                                        o2[ii][jj][kk] += perturbVal;
-                                    else
-                                        o2[ii][jj][kk] += perturbVal / (distance * distance);
-                                }
-                    }*/
-
-                    ambientO2_perturb = Util.updateGaussMarkov(ambientO2_perturb, as.ambientO2Beta, as.ambientO2Std, dt, rnd);
-                    for (int j = 0; j < ambientValueO2.length; j++) {
-                        ambientValueO2_r[j] = ambientValueO2[j] + ambientO2_perturb;
-                    }
-                    for (int j = 0; j < 2; j++) {
-                        current_perturb[j] = Util.updateGaussMarkov(current_perturb[j], as.currentBeta, as.currentStd, dt, rnd);
-                        currentOffset_r[j] = currentOffset[j] + current_perturb[j];
-                    }
-                    o2Cons_perturb = Util.getGaussValue(as.o2ConsStd, rnd);//Util.updateGaussMarkov(o2Cons_perturb, as.o2ConsBeta, as.o2ConsStd, dt, rnd);
-                    o2Cons_perturb_r = o2Cons_perturb;
-                } else {
-                    // Copy ambientValueO2 and currentOffset without perturbations:
-                    System.arraycopy(ambientValueO2, 0, ambientValueO2_r, 0, ambientValueO2.length);
-                    System.arraycopy(currentOffset, 0, currentOffset_r, 0, currentOffset.length);
-                }
-
-                // Perturb parameters according to their std. setting if we have any:
-                if (doMPI && as.perturbThisMember && as.nPar > 0) {
-
-                    for (int j=0; j<as.nPar; j++) {
-                        parVal[j] += as.parStd[j]*dt*rnd.nextGaussian();
-                    }
-
-                    /*
-                    // The first three parameters are perturbations to ambient O2 at 5, 10 and 15 m. We need to
-                    // calculate a linear interpolaton of these to all model depths before applying it:
-                    double[] ambO2Par = new double[] {parVal[0], parVal[1], parVal[2]}; // Make array of amb O2 related parameters
-                    double[] interpAmbO2Par = new double[cageDims[2]];
-                    interpolateVertical(interpAmbO2Par, as.parDepths, ambO2Par, cageDims[2], dz);
-
-                    // Apply parameter values to model:
-                    // Param 0: offset to ambient O2 values:
-                    for (int j=0; j<cageDims[2]; j++)
-                        ambientValueO2_r[j] += interpAmbO2Par[j];*/
-                    for (int j = 0; j < ambientValueO2.length; j++) {
-                        ambientValueO2_r[j] += parVal[0];
-                    }
-
-                    /*// Parameter number 4 is additional perturbation to total o2 consumption:
-                    o2Cons_perturb_r += parVal[3];*/
-                }
-
 
 
                 double[] r = ap.step(dt, fc, dxy, dz, useWalls, mask, sinkingSpeed, diffKappa, diffKappaZ, 
@@ -622,7 +397,7 @@ public class RunSimulations {
 
                 double[] res = IngestionAndO2Tempprofile.calculateIngestion(dt, fc, o2, affinity, o2Affinity, o2AffSum,
                         availableCellsForO2Uptake, ingDist, o2consDist, dxy, dz, mask, pelletWeight, ambientTemp, fish,
-                        o2Cons_perturb_r);
+                        0);
                 double totalIntake = res[0], rho = res[1], o2ConsumptionRate = res[2];
 
 
@@ -630,55 +405,14 @@ public class RunSimulations {
                 t = t + dt;
 
 
-                // Check if we are running with EnKF. If so, check if it is time to do model correction:
-                if (doMPI && i>0 && ((t/((double)as.assimInterval) - Math.floor(t/(double)as.assimInterval)) < 1e-5)) {
 
-
-                    double[][] X = mpi.gatherStateToRank0(o2, parVal);
-
-                    if (isRoot) {
-
-                        System.out.println("Calling EnKF");
-                        long tic = System.currentTimeMillis();
-                        double[][] X_a = enKF.doAnalysis(t, X, as, inData, filePrefix+"_ens.nc");
-                        long duration = System.currentTimeMillis() - tic;
-                        if (duration > 1000L)
-                            System.out.println("Analysis took "+(duration/1000L)+" seconds.");
-                        else
-                            System.out.println("Analysis took "+duration+" ms.");
-                        if (!as.dryRun && !as.isDropOutActive(t)) { // We only apply corrections if we are not doing a dry run and not in a dropout interval
-                            mpi.distributeAnalysisFromRank0(X_a, o2, parVal, cageDims, as.nPar);
-                        }
-                    } else if (!as.dryRun && !as.isDropOutActive(t)) { // We only apply corrections if we are not doing a dry run and not in a dropout interval
-                        mpi.receiveAnalysisFromRank0(o2, parVal, cageDims, as.nPar);
-                    }
-                }
-
-                // Check if we are running with EnOI. If so, check if it is time to do model correction:
-                if (!doMPI && as.useEnOI && ((t/((double)as.assimInterval) - Math.floor(t/(double)as.assimInterval)) < 1e-5)) {
-                    System.out.println("Calling EnOI");
-                    long tic = System.currentTimeMillis();
-                    // Make state vector from o2 field:
-                    double[] x_f = Util.reshapeArray(o2);
-                    double[][] x_a = enOI.doAnalysis(t, x_f, as, inData, filePrefix+"_ens.nc");
-                    long duration = System.currentTimeMillis() - tic;
-                    if (duration > 1000L)
-                        System.out.println("Analysis took "+(duration/1000L)+" seconds.");
-                    else
-                        System.out.println("Analysis took "+duration+" ms.");
-                    if (!as.dryRun && !as.isDropOutActive(t)) {
-                        Util.reshapeInto3d(x_a[0], o2, cageDims);
-                    }
-                }
 
                 // Check if it is time to store 3D fields of feed and O2:
                 if (i>0 && ((t/((double)storeIntervalFeed) - Math.floor(t/(double)storeIntervalFeed)) < 1e-5)) {
-                    if (isRoot) {
-                        double elapsed = (double) ((System.currentTimeMillis() - stime)) / 60000.;
-                        double fractionCompleted = ((double) i) / ((double) n_steps);
-                        double remaining = (elapsed / fractionCompleted) - elapsed;
-                        System.out.println("t = " + nf1.format(t) + " - Estimated time to complete: " + nf1.format(remaining) + " minutes");
-                    }
+                    double elapsed = (double) ((System.currentTimeMillis() - stime)) / 60000.;
+                    double fractionCompleted = ((double) i) / ((double) n_steps);
+                    double remaining = (elapsed / fractionCompleted) - elapsed;
+                    System.out.println("t = " + nf1.format(t) + " - Estimated time to complete: " + nf1.format(remaining) + " minutes");
 
                     if (firstStore3d) {
                         firstStore3d = false;

@@ -1,13 +1,11 @@
-package fishmodel.sim;
+package fishmodel.hydraulics;
 
 import ucar.ma2.ArrayDouble;
 import ucar.ma2.InvalidRangeException;
 import ucar.nc2.NetcdfFile;
 import ucar.nc2.Variable;
 
-import java.io.File;
 import java.io.IOException;
-import java.io.PrintWriter;
 
 
 public class CurrentMagicFields {

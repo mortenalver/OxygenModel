@@ -22,7 +22,7 @@ public class AssimSettings {
     //public String enOIEnsembleFile = "C:\\Users\\alver\\Work\\BjoroyaSim\\enoitest_dr24_06.nc";
     public double enoiAlpha = 0.1;
 
-    public boolean useTwin = true; // If running EnKF, this variable is set to true if running a twin experiment
+    public boolean useTwin = false; // If running EnKF, this variable is set to true if running a twin experiment
     public String twinDataPathPrefix = "twin2";
 
     // where measurements are acquired from the last (N-1) parallel model
@@ -66,7 +66,7 @@ public class AssimSettings {
 
     // Parameter estimation:
     public int nPar = 1;
-    double parStd0 = 0.*0.002;
+    double parStd0 = 0.002;
     double par4Std = 0.25;
     public double[] parStd = new double[] {parStd0};//, parStd0, parStd0};
 

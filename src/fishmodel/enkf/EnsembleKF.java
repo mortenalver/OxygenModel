@@ -123,14 +123,19 @@ public class EnsembleKF {
             rval[i] = measSet.std*measSet.std;
         }
         DMatrixRMaj R = CommonOps_DDRM.diag(rval);
-
+        //checkNan("X",X);
         // Compute mean state:
         DMatrixRMaj X_mean = CommonOps_DDRM.sumRows(X, null);
+        //checkNan("X_mean",X_mean);
         CommonOps_DDRM.scale(1./N_d, X_mean);
+        //checkNan("X_mean",X_mean);
+        //checkNan("e_n",e_n);
         //System.out.println("X_mean: "+X_mean.getNumRows()+"x"+X_mean.getNumCols());
         DMatrixRMaj E_X = CommonOps_DDRM.mult(X_mean, e_n, null);
 
         // Compute deviations from mean state:
+
+        //checkNan("E_X", E_X);
         DMatrixRMaj theta = CommonOps_DDRM.subtract(X, E_X, null);
         //System.out.println("theta: "+theta.getNumRows()+"x"+theta.getNumCols());
 
@@ -139,7 +144,10 @@ public class EnsembleKF {
         DMatrixRMaj MX_allsensors = CommonOps_DDRM.mult(M_allsensors, X, null);
         //System.out.println("M: "+M.getNumRows()+"x"+M.getNumCols());
         //System.out.println("MX: "+MX.getNumRows()+"x"+MX.getNumCols());
+        //checkNan("M", M);
+        //checkNan("theta", theta);
         DMatrixRMaj omega = CommonOps_DDRM.mult(M, theta, null);
+        //checkNan("omega", omega);
         //System.out.println("omega: "+omega.getNumRows()+"x"+omega.getNumCols());
 
         //phi = (1./N1)*(omega @ omega.T) + R
@@ -151,6 +159,7 @@ public class EnsembleKF {
 
         System.out.println("D: "+D.getNumRows()+"x"+D.getNumCols());
         DMatrixRMaj deviations = CommonOps_DDRM.subtract(D, MX, null);
+        //checkNan("deviations",deviations);
         DMatrixRMaj dev_exact = CommonOps_DDRM.subtract(D_exact, MX, null);
         DMatrixRMaj dev_all_exact = CommonOps_DDRM.subtract(D_all_exact, MX_allsensors, null);
 
@@ -158,9 +167,13 @@ public class EnsembleKF {
         DMatrixRMaj Kloc1 = getLocalizationMatrix(cageDims, M, numel, as.locDist, as.locZMultiplier);
 
         // Calculate Kalman gain:
+        //checkNan("Kloc1", Kloc1);
+        //checkNan("theta", theta);
+
         DMatrixRMaj K = CommonOps_DDRM.elementMult(Kloc1, CommonOps_DDRM.mult(CommonOps_DDRM.mult(theta, CommonOps_DDRM.transpose(omega,
                 null), null), phi_inv, null), null);
         System.out.println("K: "+K.getNumRows()+" x "+K.getNumCols());
+        //checkNan("K",K);
         CommonOps_DDRM.scale(1./N_1, K);
 
         DMatrixRMaj corrections = null;
@@ -172,9 +185,9 @@ public class EnsembleKF {
                 // We need to copy K elements for parameter adjustments from the EnKF K since EnOI doesn't include parameters:
                 DMatrixRMaj parRows = new DMatrixRMaj(as.nPar, K.getNumCols());
                 CommonOps_DDRM.extract(K, K.getNumRows()-as.nPar, K.getNumRows(), 0, K.getNumCols(), parRows);
-                System.out.println("parRows: "+parRows.getNumRows()+" x "+parRows.getNumCols());
+                //System.out.println("parRows: "+parRows.getNumRows()+" x "+parRows.getNumCols());
                 K_EnOI_now = CommonOps_DDRM.concatRowsMulti(K_enOI, parRows);
-                System.out.println("K_EnOI_now: "+K_EnOI_now.getNumRows()+" x "+K_EnOI_now.getNumCols());
+                //System.out.println("K_EnOI_now: "+K_EnOI_now.getNumRows()+" x "+K_EnOI_now.getNumCols());
             } else {
                 K_EnOI_now = K_enOI;
             }
@@ -182,7 +195,7 @@ public class EnsembleKF {
             DMatrixRMaj K_copy = new DMatrixRMaj(K);
             CommonOps_DDRM.scale(1.0-as.hybrid_ENOI_weight, K_copy);
             DMatrixRMaj K_weighted = CommonOps_DDRM.add(K_copy, K_EnOI_now, null);
-            System.out.println("K_weighted: "+K_weighted.getNumRows()+" x "+K_weighted.getNumCols());
+            //System.out.println("K_weighted: "+K_weighted.getNumRows()+" x "+K_weighted.getNumCols());
             corrections = CommonOps_DDRM.mult(K_weighted, deviations, null);
         }
         else {
@@ -219,6 +232,24 @@ public class EnsembleKF {
             }
         }
         return m2A_transpose(X_a);
+    }
+
+    public void checkNan(String name, DMatrixRMaj m) {
+        double maxval = Double.MIN_VALUE;
+        for (int i=0; i<m.getNumRows(); i++)
+            for (int j=0; j<m.getNumCols(); j++) {
+                if (Double.isNaN(m.get(i,j))) {
+                    System.out.println("NaN in matrix '"+name+"': i="+i+", j="+j);
+                    System.exit(0);
+                }
+                if (Double.isInfinite(m.get(i,j))) {
+                    System.out.println("Inf in matrix '"+name+"': i="+i+", j="+j);
+                    System.exit(0);
+                }
+                if (Math.abs(m.get(i,j)) > maxval)
+                    maxval = Math.abs(m.get(i,j));
+            }
+        System.out.println("Matrix '"+name+"' ok. Max abs val: "+maxval);
     }
 
     public DMatrixRMaj getLocalizationMatrix(int[] dims, DMatrixRMaj M, int numel, double locDist, double locZMultiplier) {

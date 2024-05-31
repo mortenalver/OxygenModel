@@ -38,8 +38,17 @@ public class EOFPerturbations {
         double[][] rndField = getRandomPerturbationField();
         for (int i=0; i<field.length; i++)
             for (int j=0; j<field[i].length; j++)
-                for (int k=0; k<field[i][j].length; k++)
-                    field[i][j][k] += scaleFactors[k]*rndField[i][j];
+                for (int k=0; k<field[i][j].length; k++) {
+                    if (Math.abs(scaleFactors[k]) > 1e6) {
+                        System.out.println("scale factor out of bounds");
+                        System.exit(0);
+                    }
+                    if (Math.abs(rndField[i][j]) > 1e6) {
+                        System.out.println("rndField out of bounds");
+                        System.exit(0);
+                    }
+                    field[i][j][k] += scaleFactors[k] * rndField[i][j];
+                }
     }
 
     /**
@@ -65,12 +74,15 @@ public class EOFPerturbations {
             ncfile.close();
             double[][] res = new double[shape[1]][shape[2]];
             for (int i=0; i<shape[1]; i++)
-                for (int j=0; j<shape[2]; j++)
+                for (int j=0; j<shape[2]; j++) {
                     res[i][j] = vdata.get(0, i, j);
+                }
             return res;
         } catch (IOException e) {
+            e.printStackTrace();
             throw new RuntimeException(e);
         } catch (InvalidRangeException e) {
+            e.printStackTrace();
             throw new RuntimeException(e);
         }
 

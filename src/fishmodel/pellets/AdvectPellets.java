@@ -103,8 +103,9 @@ public class AdvectPellets {
             @Override
             public void run() {
 
-                //calcAdvectAndDiff(dim, kstart, kend, pConc, dxy, dz, useWalls ? mask : null, sinkingSpeed, diffKappaXY, currentSpeed, ambientValue);
-                calcAdvectAndDiff2(dim, kstart, kend, pConc, dxy, dz, useWalls ? mask : null, sinkingSpeed, diffKappaXY, diffKappaZ, 
+                //calcAdvectAndDiff(dim, kstart, kend, pConc, dxy, dz, useWalls ? mask : null, sinkingSpeed, diffKappaXY, currentSpeed,
+                //        currentSpeedOffset, ambientValue);
+                calcAdvectAndDiff2(dim, kstart, kend, pConc, dxy, dz, useWalls ? mask : null, sinkingSpeed, diffKappaXY, diffKappaZ,
                         currentSpeed, currentSpeedOffset, ambientValue, dt);
 
                 for (int k=kstart; k<kend; k++)
@@ -213,8 +214,11 @@ public class AdvectPellets {
 
     }
 
+    /**
+     * Advection using a basic upstream scheme.
+     */
     protected void calcAdvectAndDiff(int[] dim, int kstart, int kend, double[][][] feed, double dxy, double dz, boolean[][][] mask, double sinkingSpeed,
-                                     double diffKappa, double[][][][] currentSpeed, double[] ambientValue) {
+                                     double diffKappa, double[][][][] currentSpeed, double[] currentSpeedOffset, double[] ambientValue) {
         double[][][] nbr = new double[3][3][5];
         // Third dimension of nbr: above(diff), above(adv), same, below
 
@@ -232,12 +236,12 @@ public class AdvectPellets {
 
                     // Get local currents. For each dimension we need the current on two edges:
                     double[][] current = new double[3][2];
-                    current[0][0] = currentSpeed[i][j][k][0];
-                    current[1][0] = currentSpeed[i][j][k][1];
-                    current[2][0] = currentSpeed[i][j][k][2] + sinkingSpeed;
-                    current[0][1] = currentSpeed[i+1][j][k][0];
-                    current[1][1] = currentSpeed[i][j+1][k][1];
-                    current[2][1] = currentSpeed[i][j][k+1][2] + sinkingSpeed;
+                    current[0][0] = currentSpeed[i][j][k][0] + currentSpeedOffset[0];
+                    current[1][0] = currentSpeed[i][j][k][1] + currentSpeedOffset[1];
+                    current[2][0] = currentSpeed[i][j][k][2] + currentSpeedOffset[2] + sinkingSpeed;
+                    current[0][1] = currentSpeed[i+1][j][k][0] + currentSpeedOffset[0];
+                    current[1][1] = currentSpeed[i][j+1][k][1] + currentSpeedOffset[1];
+                    current[2][1] = currentSpeed[i][j][k+1][2] + currentSpeedOffset[2] + sinkingSpeed;
 
                     // If feed is going upwards, stop at surface:
                     //if (k == 0 && current[2][0] < 0)
@@ -352,6 +356,8 @@ public class AdvectPellets {
 
     }
 
+    /** Advection using subgrid model with superbee slope limiter to reduce numerical diffusion:
+     */
     protected void calcAdvectAndDiff2(int[] dim, int kstart, int kend, double[][][] feed, double dxy, double dz, boolean[][][] mask, double sinkingSpeed,
                                       double diffKappaXY, double diffKappaZ, double[][][][] currentSpeed, 
                                       double[] currentSpeedOffset, double[] ambientVals, double dt) {

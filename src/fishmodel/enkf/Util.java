@@ -36,6 +36,10 @@ public class Util {
             for (int j = 0; j < dims[1]; j++) {
                 for (int k = 0; k < dims[2]; k++) {
                     arr[i][j][k] = elements[getStateIndex(i, j, k, dims)];
+                    /*if (Double.isNaN(arr[i][j][k])) {
+                        System.out.println("NaN: i="+i+", j="+j+", k="+k);
+                        System.exit(0);
+                    }*/
                 }
             }
         }

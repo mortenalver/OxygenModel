@@ -168,4 +168,24 @@ public class Measurements {
         }
         return M;
     }
+
+
+    public static MeasurementSet setupSensorPositionsTank(int[] cageDims, double dxy, double dz, double rad) {
+        MeasurementSet ms = new MeasurementSet();
+        ms.std = 0.1;
+
+        ms.names = new String[] {"C_1"};
+
+        // Set up o2 sensor positions in grid:
+        ms.pos = new int[1][3];
+        int xDist = (int)(cageDims[0]/2);
+        int yDist = (int)(cageDims[1]/2);
+        int zDist = (int)(cageDims[2]/2);
+        ms.pos[0][0] = xDist;
+        ms.pos[0][1] = yDist;
+        ms.pos[0][2] = zDist;
+        System.out.println("O2 sensor pos 0: "+xDist+", "+yDist+", "+xDist);
+
+        return ms;
+    }
 }
