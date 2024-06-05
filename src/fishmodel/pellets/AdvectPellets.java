@@ -362,8 +362,10 @@ public class AdvectPellets {
                                       double diffKappaXY, double diffKappaZ, double[][][][] currentSpeed, 
                                       double[] currentSpeedOffset, double[] ambientVals, double dt) {
         //double[][][] nbr = new double[5][5][7];
+        boolean masking = mask != null;
         double c_h;
-        double[] x_nb = new double[4], y_nb = new double[4], z_nb = new double[4], z_nb_diff = new double[2];
+        double[] x_nb = new double[4], y_nb = new double[4], z_nb = new double[4],
+                x_nb_diff = new double[2], y_nb_diff = new double[2], z_nb_diff = new double[2];
 
         double[] ambientValHere = new double[ambientVals.length];
 
@@ -426,6 +428,17 @@ public class AdvectPellets {
                     current[1][1] = currentSpeed[i][j + 1][k][1] + currentSpeedOffset[1];
                     current[2][1] = currentSpeed[i][j][k + 1][2] + sinkingSpeed + currentSpeedOffset[2];
 
+                    /*if (i==36 && j==36 && k==0) {
+                        for (int l = 0; l < current.length; l++) {
+                            double[] doubles = current[l];
+                            for (int m = 0; m < doubles.length; m++) {
+                                double aDouble = doubles[m];
+                                System.out.println("current["+l+"]["+m+"] = "+aDouble);
+                            }
+                        }
+                    }*/
+
+
                     // If feed is going upwards, stop at surface:
                     //if (k == 0 && current[2][0] < 0)
                     //    current[2][0] = 0;
@@ -437,15 +450,28 @@ public class AdvectPellets {
                     // Horizontal, -1 in x direction:
                     x_nb[0] = pickVal(feed, ambientValHere, i - 2, j, k);
                     x_nb[1] = pickVal(feed, ambientValHere, i - 1, j, k);
+                    // Check mask for diffusion:
+                    if (!masking || checkMask(mask, false, i-1, j, k))
+                        x_nb_diff[0] = x_nb[1];
+                    else
+                        x_nb_diff[0] = c_h;
+                    // Check mask for advection:
                     if (i >= 0) {
                         if ((mask != null) && !mask[i - 1][j][k]) {
                             current[0][0] = 0;
                         }
                     }
 
+
                     // Horizontal, +1 in x direction:
                     x_nb[2] = pickVal(feed, ambientValHere, i + 1, j, k);
                     x_nb[3] = pickVal(feed, ambientValHere, i + 2, j, k);
+                    // Check mask for diffusion:
+                    if (!masking || checkMask(mask, false, i+1, j, k))
+                        x_nb_diff[1] = x_nb[2];
+                    else
+                        x_nb_diff[1] = c_h;
+                    // Check mask for advection:
                     if (i < dim[0] - 1) {
                         if ((mask != null) && !mask[i + 1][j][k]) {
                             current[0][1] = 0;
@@ -454,6 +480,12 @@ public class AdvectPellets {
                     // Horizontal, -1 in y direction:
                     y_nb[0] = pickVal(feed, ambientValHere, i, j - 2, k);
                     y_nb[1] = pickVal(feed, ambientValHere, i, j - 1, k);
+                    // Check mask for diffusion:
+                    if (!masking || checkMask(mask, false, i, j-1, k))
+                        y_nb_diff[0] = y_nb[1];
+                    else
+                        y_nb_diff[0] = c_h;
+                    // Check mask for advection:
                     if (j > 0) {
                         if ((mask != null) && !mask[i][j - 1][k]) {
                             current[1][0] = 0;
@@ -463,6 +495,12 @@ public class AdvectPellets {
                     // Horizontal, +1 in y direction:
                     y_nb[2] = pickVal(feed, ambientValHere, i, j + 1, k);
                     y_nb[3] = pickVal(feed, ambientValHere, i, j + 2, k);
+                    // Check mask for diffusion:
+                    if (!masking || checkMask(mask, false, i, j+1, k))
+                        y_nb_diff[1] = y_nb[2];
+                    else
+                        y_nb_diff[1] = c_h;
+                    // Check mask for advection:
                     if (j < dim[1] - 1) {
                         if ((mask != null) && !mask[i][j + 1][k]) {
                             current[1][1] = 0;
@@ -480,8 +518,9 @@ public class AdvectPellets {
                     z_nb[2] = pickVal(feed, ambientValHere, i, j, k + 1);
                     z_nb[3] = pickVal(feed, ambientValHere, i, j, k + 2);
                     z_nb_diff[1] = z_nb[2];
-                    if (k == dim[2] - 1)
-                        z_nb_diff[1] = ambientValHere[k]; // By bottom
+                    // Check mask for diffusion:
+                    if (masking && !checkMask(mask, false, i, j, k+1))
+                        z_nb_diff[0] = c_h;
 
                     // Note current directions:
                     int[][] curDir = new int[3][2];
@@ -503,14 +542,23 @@ public class AdvectPellets {
                     }*/
 
                     // Collect advection terms:
-                    boolean simpleA = false;//i==7 && j==19 && k==20 && counter==3;
+                    boolean simpleA = true;//i==7 && j==19 && k==20 && counter==3;
 
                     if (!simpleA) {
+
+                        /*if (i==36 && j==36 && k==0) {
+                            System.out.println("x_nb[1]="+x_nb[1]+", c_h="+c_h+", x_nb[2]="+x_nb[2]+", 1/dxy="+(1/dxy));
+                            System.out.println("advX = "+superbeeAdv(dt, dxy, x_nb[0], x_nb[1], c_h, x_nb[2], x_nb[3], current[0][0], current[0][1]));
+                            System.out.println("advY = "+superbeeAdv(dt, dxy, y_nb[0], y_nb[1], c_h, y_nb[2], y_nb[3], current[1][0], current[1][1]));
+                            System.out.println("advZ = "+superbeeAdv(dt, dz, z_nb[0], z_nb[1], c_h, z_nb[2], z_nb[3], current[2][0], current[2][1]));
+                        }*/
+
                         advect[i][j][k] = superbeeAdv(dt, dxy, x_nb[0], x_nb[1], c_h, x_nb[2], x_nb[3], current[0][0], current[0][1])
                                 + superbeeAdv(dt, dxy, y_nb[0], y_nb[1], c_h, y_nb[2], y_nb[3], current[1][0], current[1][1])
                                 + superbeeAdv(dt, dz, z_nb[0], z_nb[1], c_h, z_nb[2], z_nb[3], current[2][0], current[2][1]);
+
                     } else {
-                        // Ser ut til å fungere for uniformt strømfelt, gir ganske like resultat som superbee
+                        /*// Ser ut til å fungere for uniformt strømfelt, gir ganske like resultat som superbee
                         advect[i][j][k] = (1 / dxy) *
                                 (((current[0][0] > 0) ? current[0][0] * x_nb[1] : current[0][0] * c_h)
                                         + ((current[0][1] < 0) ? -current[0][1] * x_nb[2] : -current[0][1] * c_h)
@@ -518,19 +566,34 @@ public class AdvectPellets {
                                         + ((current[1][1] < 0) ? -current[1][1] * y_nb[2] : -current[1][1] * c_h))
                                 + (1 / dz) *
                                 (((current[2][0] > 0) ? current[2][0] * z_nb[1] : current[2][0] * c_h)
-                                        + ((current[2][1] < 0) ? -current[2][1] * z_nb[2] : -current[2][1] * c_h));
+                                        + ((current[2][1] < 0) ? -current[2][1] * z_nb[2] : -current[2][1] * c_h));*/
 
-
-                        /*advect[i][j][k] = simpleAdv(dt, dxy, x_nb[0], x_nb[1], c_h, x_nb[2], x_nb[3], current[0][0], current[0][1])
+                        advect[i][j][k] = simpleAdv(dt, dxy, x_nb[0], x_nb[1], c_h, x_nb[2], x_nb[3], current[0][0], current[0][1])
                                 + simpleAdv(dt, dxy, y_nb[0], y_nb[1], c_h, y_nb[2], y_nb[3], current[1][0], current[1][1])
-                                + simpleAdv(dt, dz, z_nb[0], z_nb[1], c_h, z_nb[2], z_nb[3], current[2][0], current[2][1]);*/
+                                + simpleAdv(dt, dz, z_nb[0], z_nb[1], c_h, z_nb[2], z_nb[3], current[2][0], current[2][1]);
+
+                        /*if ((i==36 && j==36 && k==0)) {
+                            System.out.println("x_nb[1]="+x_nb[1]+", c_h="+c_h+", x_nb[2]="+x_nb[2]+", 1/dxy="+(1/dxy));
+                            System.out.println("advX = "+simpleAdv(dt, dxy, x_nb[0], x_nb[1], c_h, x_nb[2], x_nb[3], current[0][0], current[0][1]));
+                            System.out.println("advY = "+simpleAdv(dt, dxy, y_nb[0], y_nb[1], c_h, y_nb[2], y_nb[3], current[1][0], current[1][1]));
+                            System.out.println("advZ = "+simpleAdv(dt, dz, z_nb[0], z_nb[1], c_h, z_nb[2], z_nb[3], current[2][0], current[2][1]));
+                            System.out.println("1");
+                        }*/
+
                     }
 
 
                     // Collect diffusion terms:
-                    diffus[i][j][k] = diffKappaXY * ((x_nb[1] - 2 * c_h + x_nb[2]) / dxy / dxy
-                            + (y_nb[1] - 2 * c_h + y_nb[2]) / dxy / dxy)
+
+                    diffus[i][j][k] = diffKappaXY * ((x_nb_diff[0] - 2 * c_h + x_nb_diff[1]) / dxy / dxy
+                            + (y_nb_diff[0] - 2 * c_h + y_nb_diff[1]) / dxy / dxy)
                             + diffKappaZ * ((z_nb_diff[0] - 2 * c_h + z_nb_diff[1]) / dz / dz);
+
+                    /*if (i==36 && j==36 && k==0) {
+                        System.out.println("Value: "+feed[i][j][k]);
+                        System.out.println("Advect: "+advect[i][j][k]);
+                        System.out.println("Diffus: "+diffus[i][j][k]);
+                    }*/
                 }
         }
     }
@@ -541,6 +604,15 @@ public class AdvectPellets {
         if (i<0 || i>=fc.length || j<0 || j>=fc[0].length || k>=fc[0][0].length)
             return ambVal[Math.min(ambVal.length-1,k)];
         else return fc[i][j][k];
+    }
+
+    /**
+     * Return the value of the mask at the given coordinate, or the default value if coordinates are outside the domain.
+     */
+    private boolean checkMask(boolean[][][] mask, boolean defVal, int i, int j, int k) {
+        if (i<0 || i>=mask.length || j<0 || j>=mask[0].length || k<0 || k>=mask[0][0].length)
+            return defVal;
+        else return mask[i][j][k];
     }
 
     private double minModAdv(double dt, double dx, double c_ll, double c_l, double c_c, double c_r, double c_rr, double v_l, double v_r) {

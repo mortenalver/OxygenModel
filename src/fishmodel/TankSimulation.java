@@ -10,22 +10,16 @@
  */
 package fishmodel;
 
-import fishmodel.enkf.*;
-import fishmodel.hydraulics.Balanced3DHydraulics;
-import fishmodel.hydraulics.SimpleTankHydraulics;
+
 import fishmodel.hydraulics.StationaryTankFlow;
 import fishmodel.pellets.AdvectPellets;
 import fishmodel.pellets.IngestionAndO2Tempprofile;
-import fishmodel.pellets.PelletSpreaderModel;
 import fishmodel.pellets.SimpleFish;
-import fishmodel.hydraulics.CurrentMagicFields;
-import fishmodel.sim.InputDataNetcdf;
 import org.apache.commons.math3.analysis.interpolation.LinearInterpolator;
 import org.apache.commons.math3.analysis.polynomials.PolynomialSplineFunction;
 import save.SaveNetCDF;
 import ucar.nc2.NetcdfFileWriteable;
 
-import java.io.File;
 import java.io.IOException;
 import java.text.NumberFormat;
 import java.text.SimpleDateFormat;
@@ -58,17 +52,10 @@ public class TankSimulation {
 
         // Simulation settings:
         boolean maskO2WhenSaving = false;
-        boolean decreasingCurrentFactor = true; // Model gradual decrease in current factor due to
-                                                // increasing cage net biofouling
 
-        StationaryTankFlow tankFlow = new StationaryTankFlow("C:\\Users\\alver\\OneDrive - NTNU\\prosjekt\\AQUAEXCEL3\\particleTransport\\inrae_mod_max_3d_4.nc");
-
-        boolean use3dBalancedCurrent = false; // Use Balanced3DHydraulics
-
-        boolean useVerticalDist = true; // Use non-uniform vertical distribution (defined further down)
+        boolean useVerticalDist = false; // Use non-uniform vertical distribution (defined further down)
                                         // for non-feeding fish
 
-        boolean useInstantaneousAmbientVals = true; // true to use ambient value time series, false to use daily averages
 
         //boolean includeHypoxiaAvoidance = true;     int checkAvoidanceInterval = 30, checkAvoidanceCount = 0;
 
@@ -91,22 +78,25 @@ public class TankSimulation {
         // Simulation start time:
         int initYear = 2022, initMonth = Calendar.JUNE, initDate = 27, initHour = 0, initMin = 0, initSec = 0;
         initDate += daysToAdd;
-        double t_end = 15*60;//1*24*3600; // Duration of simulation
+        double t_end = 60*60+1;//1*24*3600; // Duration of simulation
         int nSim = 1; // Number of days to simulate (separate sims)
         int startAt = 0; // Set to >0 to skip one of more simulations, but count them in the sim numbering
 
         // Common settings:
         double rad = 3;
-        double depth = 1, totDepth = 1; // Cage size (m)
+        double depth = 1.1, totDepth = 1; // Cage size (m)
         double dxy = 0.1, dz = dxy; // Model resolution (m)
         double dt = .5 * dxy; // Time step (s)
-        int storeIntervalFeed = 60, storeIntervalInfo = 60;
+        double storeIntervalSFeed = 60, storeIntervalSInfo = 60;
+        int storeIntervalFeed = (int)Math.round(storeIntervalSFeed/dt);
+        int storeIntervalInfo = (int)Math.round(storeIntervalSInfo/dt);
+        System.out.println("Store intervals: "+storeIntervalFeed+" / "+storeIntervalInfo);
         double fishMaxDepth = 20; // The maximum depth of the fish under non-feeding conditions
 
         double currentReductionFactor = 1.0; // Multiplier for inside current as function of outside
 
         // Environmental conditions:
-        double T_w = 14; double avO2 = 9; // mg / l
+        double T_w = 14; double avO2 = 8; // mg / l
 
         // Oxygen diffusion constant (values updated further down)
         double diffKappaO2 = 0.1, diffKappaO2Z = 0.1;
@@ -115,7 +105,7 @@ public class TankSimulation {
         double[] currentOffset_r = new double[] {0,0,0}; // Perturbed global current vector
 
         // Fish setup (N, mean weight and std.dev weight):
-        double nFishTank = 150; // Estimated number of individuals in experimental period (source: FishTalk data)
+        double nFishTank = 1e-7*150; // Estimated number of individuals in experimental period (source: FishTalk data)
         double meanWeight = 2869.5; // Estimated mean weight in experimental period (source: FishTalk data)
         double[] wFish = new double[] {meanWeight, 0.2*meanWeight};
         
@@ -143,15 +133,16 @@ public class TankSimulation {
         cageDims[1] = cageDims[0];
         cageDims[2] = (int)Math.ceil(depth/dz)+1;
         boolean[][][] mask = null;
-        mask = CageMasking.circularMasking(cageDims, dxy, rad, false); // null
+        mask = CageMasking.circularMasking(cageDims, dxy, rad, true); // null
 
         boolean useWalls = true;
         System.out.println("Domain dimensions: ("+cageDims[0]+", "+cageDims[1]+", "+cageDims[2]+")");
 
+
         // Feeding setup:
         // Feeding periods (start/end in s):
         // Fra Eskil (Bjørøya): måltidene varte fra ca. kl. 07:30-17:30, i gjennomsnitt.
-        int[][] feedingPeriods = new int[][] {{120, 3600}};
+        int[][] feedingPeriods = new int[][] {{0, 3600}};
         int nPeriods = feedingPeriods.length;
         for (int i=0; i<nPeriods; i++) {
             System.out.println("Feeding period "+(i+1)+": "+feedingPeriods[i][0]+" to "+feedingPeriods[i][1]);
@@ -213,12 +204,11 @@ public class TankSimulation {
 
         // Oxygen
         double[] ambientValueO2 = new double[cageDims[2]]; // Ambient value of O2
-        double[] ambientValueO2_r = new double[cageDims[2]]; // Possibly perturbed ambient value of O2
         for (int i = 0; i < ambientValueO2.length; i++) {
-            ambientValueO2[i] = avO2;
+            ambientValueO2[i] = 20;///avO2;
         }
 
-
+        avO2 = 10;
 
         // Initialize number formatter:
         NumberFormat nf1 = NumberFormat.getNumberInstance(Locale.ENGLISH);
@@ -246,15 +236,15 @@ public class TankSimulation {
 
             // Current field
             double[][][][] hydro;
-            // Here you set up the current profile (3D current vector per depth layer):
-            double[][] currentProfile = new double[cageDims[2] + 1][3];
-            for (int i=0; i<cageDims[2]+1; i++) {
-                currentProfile[i][0] = 0;
-            }
-            hydro = SimpleTankHydraulics.getProfileHydraulicField(cageDims, currentProfile);
-
-            if (decreasingCurrentFactor)
-                currentReductionFactor = 0.8 + 0.05 - ((double)sim)*(0.2/*0.25*//8.0);
+            StationaryTankFlow tankFlow = new StationaryTankFlow("C:\\Users\\alver\\OneDrive - NTNU\\prosjekt\\AQUAEXCEL3\\particleTransport\\inrae_orig_max_3d_4.nc",
+                    cageDims, dxy, dz);
+            hydro = tankFlow.getFlowField();
+            //int[] inletPos = tankFlow.getCellForCoordinates(new double[] {3, 0.15, 0.77}, dxy, dz);
+            //int[] inletPos = tankFlow.getCellForCoordinates(new double[] {4.16, 1.56, 0.142}, dxy, dz);
+            int[] inletPos = new int[] {7, 36, 2};
+            System.out.println("Inlet cell: "+inletPos[0]+", "+inletPos[1]+", "+inletPos[2]+", mask="+mask[inletPos[0]][inletPos[1]][inletPos[2]]);
+            System.out.println("w curr at inlet: "+hydro[inletPos[0]][inletPos[1]][inletPos[2]][2]+
+                    " , "+hydro[inletPos[0]][inletPos[1]][inletPos[2]+1][2]);
 
             AdvectPellets ap = new AdvectPellets();
             AdvectPellets apOx = new AdvectPellets();
@@ -291,7 +281,7 @@ public class TankSimulation {
 
             double[][] surfFeed = new double[cageDims[0]][cageDims[1]];
             int nCells = 0;
-            int centerX = cageDims[0]/2, centerY = cageDims[1]/2;
+            int centerX = (int)(cageDims[0]/3), centerY = cageDims[1]/2;
             for (int i=0; i<surfFeed.length; i++)
                 for (int j=0; j<surfFeed[i].length; j++) {
                     if (mask[i][j][0]) {
@@ -345,10 +335,8 @@ public class TankSimulation {
                 currentOffset[0] = 0.;//currentReductionFactor*currentSpeed*Math.cos(currentDirection*Math.PI/180.);
                 currentOffset[1] = 0.;//currentReductionFactor*currentSpeed*Math.sin(currentDirection*Math.PI/180.);
 
-                //diffKappaO2 = 0.2*Math.min(0.5, 10*Math.pow(currentReductionFactor*0.06,2)); // Math.min(0.5, 10*Math.pow(currentReductionFactor*0.04,2));
-                //diffKappaO2Z = 5.0*0.1*Math.min(0.5, 10*Math.pow(currentReductionFactor*0.06,2)); // Math.min(0.5, 10*Math.pow(currentReductionFactor*0.04,2));
-                diffKappaO2 = Math.min(0.5, 10*Math.pow(currentReductionFactor*0.06,2)); // Math.min(0.5, 10*Math.pow(currentReductionFactor*0.04,2));
-                diffKappaO2Z = 5.0*0.1*Math.min(0.5, 10*Math.pow(currentReductionFactor*0.06,2)); // Math.min(0.5, 10*Math.pow(currentReductionFactor*0.04,2));
+                diffKappaO2 = 0.001;
+                diffKappaO2Z = diffKappaO2;
                 //System.out.println("DiffKappa O2: "+diffKappaO2);
 
                 // Update feeding rate depending on preset feeding periods:
@@ -385,14 +373,17 @@ public class TankSimulation {
                 double maxval = 0;
 
 
-                double[] r = ap.step(dt, fc, dxy, dz, useWalls, mask, sinkingSpeed, diffKappa, diffKappaZ, 
+                double[] r = ap.step(dt, fc, dxy, dz, useWalls, mask, sinkingSpeed, diffKappa, diffKappaZ,
                         hydro, currentOffset_r, sourceTerm, feedingRateMult, ambientValueFeed);
                 outFlow = r[0]; // Feed lost from grid (not used)
                 outFlow_net = r[1]; // Feed lost from the unmasked part of the grid (feed lost through side)
 
 
+                // Set inlet o2 value at inlet position each time step:
+                o2[inletPos[0]][inletPos[1]][inletPos[2]] += dt*0.5;
+
                 double[] o2OutFlow = apOx.step(dt, o2, dxy, dz, useWalls, mask, 0, diffKappaO2, diffKappaO2Z,
-                        hydro, currentOffset_r, feedingRate, 0, ambientValueO2_r);
+                        hydro, currentOffset_r, feedingRate, 0, ambientValueO2);
 
 
                 double[] res = IngestionAndO2Tempprofile.calculateIngestion(dt, fc, o2, affinity, o2Affinity, o2AffSum,
@@ -408,7 +399,8 @@ public class TankSimulation {
 
 
                 // Check if it is time to store 3D fields of feed and O2:
-                if (i>0 && ((t/((double)storeIntervalFeed) - Math.floor(t/(double)storeIntervalFeed)) < 1e-5)) {
+                if (i>0 && ((i+1)%storeIntervalFeed == 0)) {
+                //((t/((double)storeIntervalFeed) - Math.floor(t/(double)storeIntervalFeed)) < 1e-5)) {
                     double elapsed = (double) ((System.currentTimeMillis() - stime)) / 60000.;
                     double fractionCompleted = ((double) i) / ((double) n_steps);
                     double remaining = (elapsed / fractionCompleted) - elapsed;
@@ -441,7 +433,8 @@ public class TankSimulation {
                 }
 
                 // Check if it is time to store scalar output values:
-                if (i>0 && ((t/((double)storeIntervalInfo) - Math.floor(t/(double)storeIntervalInfo)) < 1e-5)) {
+                if (i>0 && ((i+1)%storeIntervalInfo == 0)) {
+                    //(i>0 && ((t/((double)storeIntervalInfo) - Math.floor(t/(double)storeIntervalInfo)) < 1e-5)) {
 
                     if (firstStoreScalars) {
                         firstStoreScalars = false;
@@ -518,16 +511,6 @@ public class TankSimulation {
                     SaveNetCDF.saveProfileVariable(fishfile, t, "ext_O2", 2, ambientValueO2, false);
 
 
-                    // Save external current speed and direction(input values):
-                    double[] currentComp = new double[cageDims[2]];
-                    for (int j = 0; j < currentComp.length; j++) {
-                        currentComp[j] = currentProfile[j][0];
-                    }
-                    SaveNetCDF.saveProfileVariable(fishfile, t, "ext_currentU", 2, currentComp, false);
-                    for (int j = 0; j < currentComp.length; j++) {
-                        currentComp[j] = currentProfile[j][1];
-                    }
-                    SaveNetCDF.saveProfileVariable(fishfile, t, "ext_currentV", 2, currentComp, false);
 
                     // Save feeding rage (input value):
                     SaveNetCDF.saveScalarVariable(fishfile, t, "feedingRate", feedingRateMult, false);
