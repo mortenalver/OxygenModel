@@ -130,12 +130,13 @@ public class StationaryTankFlow {
                     hydro[i][j][k][1] = getValueV(cfieldsV, xvalV, yvalV, zvalU, dxy, dz);
                     boolean message = false;
                     //if (i==44 && j==19 && k==9) message = true;
-                    hydro[i][j][k][2] = -getValueW(cfieldsW, xvalV, yvalU, zvalW, dxy, dz, message);
+                    if (k>0)
+                        hydro[i][j][k][2] = -getValueW(cfieldsW, xvalV, yvalU, zvalW, dxy, dz, message);
 
-                    if (Math.abs(hydro[i][j][k][2]) > 0.5) {
+                    /*if (Math.abs(hydro[i][j][k][2]) > 0.5) {
                         System.out.println("High val at: ("+i+", "+j+", "+k+"): "+hydro[i][j][k][2]);
                         System.out.println("Position: "+xvalV+", "+yvalU+", "+zvalW);
-                    }
+                    }*/
                 }
             }
         }

@@ -12,7 +12,7 @@ package fishmodel;
 
 
 import fishmodel.hydraulics.StationaryTankFlow;
-import fishmodel.pellets.AdvectPellets;
+import fishmodel.pellets.AdvectPelletsVarCurr;
 import fishmodel.pellets.IngestionAndO2Tempprofile;
 import fishmodel.pellets.SimpleFish;
 import org.apache.commons.math3.analysis.interpolation.LinearInterpolator;
@@ -46,12 +46,12 @@ public class TankSimulation {
 
         // Save files:
         String saveDir = "./";
-        String simNamePrefix = "tanktest4";
+        String simNamePrefix = "tanktest_add_fish";
         String simNamePostfix = "";
 
 
         // Simulation settings:
-        boolean maskO2WhenSaving = false;
+        boolean maskO2WhenSaving = true;
 
         boolean useVerticalDist = false; // Use non-uniform vertical distribution (defined further down)
                                         // for non-feeding fish
@@ -78,7 +78,7 @@ public class TankSimulation {
         // Simulation start time:
         int initYear = 2022, initMonth = Calendar.JUNE, initDate = 27, initHour = 0, initMin = 0, initSec = 0;
         initDate += daysToAdd;
-        double t_end = 60*60+1;//1*24*3600; // Duration of simulation
+        double t_end = 3*3600+1;//1*24*3600; // Duration of simulation
         int nSim = 1; // Number of days to simulate (separate sims)
         int startAt = 0; // Set to >0 to skip one of more simulations, but count them in the sim numbering
 
@@ -105,8 +105,8 @@ public class TankSimulation {
         double[] currentOffset_r = new double[] {0,0,0}; // Perturbed global current vector
 
         // Fish setup (N, mean weight and std.dev weight):
-        double nFishTank = 1e-7*150; // Estimated number of individuals in experimental period (source: FishTalk data)
-        double meanWeight = 2869.5; // Estimated mean weight in experimental period (source: FishTalk data)
+        double nFishTank = 300;
+        double meanWeight = 4000;
         double[] wFish = new double[] {meanWeight, 0.2*meanWeight};
         
         // Wind speed (x, y components in m/s) affecting feed spreader:
@@ -236,18 +236,22 @@ public class TankSimulation {
 
             // Current field
             double[][][][] hydro;
-            StationaryTankFlow tankFlow = new StationaryTankFlow("C:\\Users\\alver\\OneDrive - NTNU\\prosjekt\\AQUAEXCEL3\\particleTransport\\inrae_orig_max_3d_4.nc",
+            StationaryTankFlow tankFlow = new StationaryTankFlow("C:\\Users\\alver\\OneDrive - NTNU\\prosjekt\\AQUAEXCEL3\\particleTransport\\inrae_mod_max_3d_4.nc",
                     cageDims, dxy, dz);
             hydro = tankFlow.getFlowField();
             //int[] inletPos = tankFlow.getCellForCoordinates(new double[] {3, 0.15, 0.77}, dxy, dz);
             //int[] inletPos = tankFlow.getCellForCoordinates(new double[] {4.16, 1.56, 0.142}, dxy, dz);
-            int[] inletPos = new int[] {7, 36, 2};
+            //int[] inletPos = new int[] {7, 36, 2}; // INRAE orig
+            int[] inletPos = new int[] {15, 36, 2};
+            // INRAE max flow is 9.72 l/s. Divide by cell size (l). Multiply by DO level in in water.
+            double inletAddPerS = 100/(1000*dxy*dxy*dz);
+            System.out.println("Inlet addition rate (per s): "+inletAddPerS);
             System.out.println("Inlet cell: "+inletPos[0]+", "+inletPos[1]+", "+inletPos[2]+", mask="+mask[inletPos[0]][inletPos[1]][inletPos[2]]);
             System.out.println("w curr at inlet: "+hydro[inletPos[0]][inletPos[1]][inletPos[2]][2]+
                     " , "+hydro[inletPos[0]][inletPos[1]][inletPos[2]+1][2]);
 
-            AdvectPellets ap = new AdvectPellets();
-            AdvectPellets apOx = new AdvectPellets();
+            AdvectPelletsVarCurr ap = new AdvectPelletsVarCurr();
+            AdvectPelletsVarCurr apOx = new AdvectPelletsVarCurr();
 
 
             // Format a unit string for the time variable to save to NetCDF giving the initial time:
@@ -264,8 +268,8 @@ public class TankSimulation {
             double[][][] o2 = new double[cageDims[0]][cageDims[1]][cageDims[2]];
             double[][][] ingDist = new double[cageDims[0]][cageDims[1]][cageDims[2]];
             double[][][] o2consDist = new double[cageDims[0]][cageDims[1]][cageDims[2]];
-            AdvectPellets.initField(o2, avO2);
-            AdvectPellets.initField(ingDist, 0);
+            AdvectPelletsVarCurr.initField(o2, avO2);
+            AdvectPelletsVarCurr.initField(ingDist, 0);
             double outFlow = 0., outFlow_net = 0.;
 
             // Initialize O2 field based on first ambient values:
@@ -335,7 +339,7 @@ public class TankSimulation {
                 currentOffset[0] = 0.;//currentReductionFactor*currentSpeed*Math.cos(currentDirection*Math.PI/180.);
                 currentOffset[1] = 0.;//currentReductionFactor*currentSpeed*Math.sin(currentDirection*Math.PI/180.);
 
-                diffKappaO2 = 0.001;
+                diffKappaO2 = 0.00001;
                 diffKappaO2Z = diffKappaO2;
                 //System.out.println("DiffKappa O2: "+diffKappaO2);
 
@@ -380,7 +384,7 @@ public class TankSimulation {
 
 
                 // Set inlet o2 value at inlet position each time step:
-                o2[inletPos[0]][inletPos[1]][inletPos[2]] += dt*0.5;
+                o2[inletPos[0]][inletPos[1]][inletPos[2]] += dt*inletAddPerS;
 
                 double[] o2OutFlow = apOx.step(dt, o2, dxy, dz, useWalls, mask, 0, diffKappaO2, diffKappaO2Z,
                         hydro, currentOffset_r, feedingRate, 0, ambientValueO2);
@@ -493,7 +497,7 @@ public class TankSimulation {
                                 totalFeed += fc[ii][j][k];
                     SaveNetCDF.saveScalarVariable(fishfile, t, "totFeed", totalFeed, false);
 
-                    double meanFeedDepth = AdvectPellets.getMeanFeedDepth(fc, dz, mask);
+                    double meanFeedDepth = AdvectPelletsVarCurr.getMeanFeedDepth(fc, dz, mask);
                     SaveNetCDF.saveScalarVariable(fishfile, t, "meanFeedDepth", meanFeedDepth, false);
 
                     double dMeanFeedDepth = (lastMeanFeedDepth > 0) ? (meanFeedDepth - lastMeanFeedDepth) / dt : 0;
