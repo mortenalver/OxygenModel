@@ -30,8 +30,8 @@ public class CurrentMagicFields {
             
             // Get shape of u variable:
             int[] shape = uVar.getShape();
-            //for (int i=0; i<shape.length; i++)
-            //    System.out.println("shape["+(i)+"]: "+shape[i]);
+            for (int i=0; i<shape.length; i++)
+                System.out.println("shape["+(i)+"]: "+shape[i]);
 
             ArrayDouble.D1 thetasD = (ArrayDouble.D1)angVar.read(new int[]{0}, angShape);
 
@@ -41,8 +41,8 @@ public class CurrentMagicFields {
                 thetas[i] = thetasD.get(i);
             d_theta = thetas[1]-thetas[0];
 
-            for (int i=0; i<angShape[0]; i++)
-                System.out.println(thetas[i]);
+            /*for (int i=0; i<angShape[0]; i++)
+                System.out.println(thetas[i]);*/
 
             cfieldsU = new double[shape[1]][shape[2]][shape[0]];
             cfieldsV = new double[shape[1]][shape[2]][shape[0]];
@@ -51,8 +51,8 @@ public class CurrentMagicFields {
                 ArrayDouble.D3 valueV = (ArrayDouble.D3)vVar.read(new int[] {k, 0, 0}, new int[] {1, shape[1], shape[2]});
                 for (int i = 0; i < shape[1]; i++) {
                     for (int j = 0; j < shape[2]; j++) {
-                        cfieldsU[i][j][k] = valueU.get(0, j, i);
-                        cfieldsV[i][j][k] = valueV.get(0, j, i);
+                        cfieldsU[i][j][k] = valueU.get(0, i, j);
+                        cfieldsV[i][j][k] = valueV.get(0, i, j);
                         //System.out.print(cfields[i][j][0] + " ");
                     }
                     //System.out.println("");
@@ -121,6 +121,7 @@ public class CurrentMagicFields {
             int fieldI = chooseField(angles[k]);
             for (int i=0; i<field.length; i++)
                 for (int j=0; j<field[i].length; j++) {
+                    //System.out.println("i="+i+", j="+j+", fieldI="+fieldI+", field.length="+field.length);
                     field[i][j][k][0] = speeds[k]*cfieldsU[i][j][fieldI];
                     field[i][j][k][1] = speeds[k]*cfieldsV[i][j][fieldI];
                     //field[i][j][k][0] = cfieldsU[i][j][fieldI];

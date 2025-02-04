@@ -201,7 +201,7 @@ public class AdvectPelletsVarCurr {
 
     }
 
-    /** Advection using subgrid model with superbee slope limiter to reduce numerical diffusion:
+    /**
      */
     protected void calcAdvectAndDiff(int[] dim, int kstart, int kend, double[][][] feed, double dxy, double dz, boolean[][][] mask, double sinkingSpeed,
                                      double diffKappaXY, double diffKappaZ, double[][][][] currentSpeed,
@@ -232,38 +232,20 @@ public class AdvectPelletsVarCurr {
 
                             //double[] vecHere = new double[]{((double) i) - ambRedCenter[0], ((double) j) - ambRedCenter[1]};
                             double ambRedValue = 0, ambRedValue2 = 0, multiplier = 0;
-                            //double tmp1 = 0, tmp2 = 0;
                             double[] currHere = new double[] {currentSpeed[i][j][k][0] + currentSpeedOffset[0],
                                     currentSpeed[i][j][k][1] + currentSpeedOffset[1]};
                             double currHereSpeed = 100.*Math.sqrt(currHere[0]*currHere[0]+currHere[1]*currHere[1]);
-                            //double multiplier = 1.1*Math.max(0.5, Math.min(2.5, 0.35*(7.4-currHereSpeed)));
                             double omega_red = 0.35;
                             if (currHereSpeed < 6)
                                 omega_red = 1.85 - 0.25*currHereSpeed;
 
-                            //System.out.println(currHereSpeed+"\t"+multiplier);
                             ambRedValue = ((double)(dim[0] - i)/((double)dim[0])) * omega_red * affinityProfile[k];
-                            //tmp1 = ((double)(dim[0] - i)/((double)dim[0]))*33.*2.;
-
-                            /*double dotProd = vecHere[0] * dsVector[0] + vecHere[1] * dsVector[1];
-                            if (dotProd < 0) {
-                                //double[] currHere = new double[] {currentSpeed[i][j][k][0] + currentSpeedOffset[0],
-                                //        currentSpeed[i][j][k][1] + currentSpeedOffset[1]};
-                                //double currHereSpeed = 100.*Math.sqrt(currHere[0]*currHere[0]+currHere[1]*currHere[1]);
-                                multiplier = 1.1*Math.max(0.5, Math.min(2.5, 0.35*(7.4-currHereSpeed)));
-                                tmp2 = multiplier*ambRedMult*(33.)*2.;
-                                //System.out.println(currHereSpeed+"\t"+multiplier);
-                                ambRedValue2 = -dotProd * ambRedMult * multiplier * affinityProfile[k] * dxy;
-                            }*/
-
 
                             for (int ii = 0; ii < ambientValHere.length; ii++)
                                 ambientValHere[ii] -= ambRedValue;
-
                         }
-
-
                     }
+
                     // Get local currents. For each dimension we need the current on two edges:
                     double[][] current = new double[3][2];
                     current[0][0] = currentSpeed[i][j][k][0] + currentSpeedOffset[0];
@@ -272,22 +254,6 @@ public class AdvectPelletsVarCurr {
                     current[0][1] = currentSpeed[i + 1][j][k][0] + currentSpeedOffset[0];
                     current[1][1] = currentSpeed[i][j + 1][k][1] + currentSpeedOffset[1];
                     current[2][1] = currentSpeed[i][j][k + 1][2] + sinkingSpeed + currentSpeedOffset[2];
-
-                    /*if (i==36 && j==36 && k==0) {
-                        for (int l = 0; l < current.length; l++) {
-                            double[] doubles = current[l];
-                            for (int m = 0; m < doubles.length; m++) {
-                                double aDouble = doubles[m];
-                                System.out.println("current["+l+"]["+m+"] = "+aDouble);
-                            }
-                        }
-                    }*/
-
-
-                    // If feed is going upwards, stop at surface:
-                    //if (k == 0 && current[2][0] < 0)
-                    //    current[2][0] = 0;
-
 
                     //*** Defining cell neighbourhood:
                     c_h = feed[i][j][k];
@@ -387,7 +353,7 @@ public class AdvectPelletsVarCurr {
                     }*/
 
                     // Collect advection terms:
-                    boolean simpleA = true;//i==7 && j==19 && k==20 && counter==3;
+                    boolean simpleA = false;//i==7 && j==19 && k==20 && counter==3;
 
                     if (!simpleA) {
 
@@ -398,9 +364,13 @@ public class AdvectPelletsVarCurr {
                             System.out.println("advZ = "+superbeeAdv(dt, dz, z_nb[0], z_nb[1], c_h, z_nb[2], z_nb[3], current[2][0], current[2][1]));
                         }*/
 
-                        advect[i][j][k] = superbeeAdv(dt, dxy, x_nb[0], x_nb[1], c_h, x_nb[2], x_nb[3], current[0][0], current[0][1])
+                        /*advect[i][j][k] = superbeeAdv(dt, dxy, x_nb[0], x_nb[1], c_h, x_nb[2], x_nb[3], current[0][0], current[0][1])
                                 + superbeeAdv(dt, dxy, y_nb[0], y_nb[1], c_h, y_nb[2], y_nb[3], current[1][0], current[1][1])
                                 + superbeeAdv(dt, dz, z_nb[0], z_nb[1], c_h, z_nb[2], z_nb[3], current[2][0], current[2][1]);
+                         */
+                        advect[i][j][k] = balancingSuperbeeAdv(dt, dxy, x_nb[0], x_nb[1], c_h, x_nb[2], x_nb[3], current[0][0], current[0][1])
+                                + balancingSuperbeeAdv(dt, dxy, y_nb[0], y_nb[1], c_h, y_nb[2], y_nb[3], current[1][0], current[1][1])
+                                + balancingSuperbeeAdv(dt, dz, z_nb[0], z_nb[1], c_h, z_nb[2], z_nb[3], current[2][0], current[2][1]);
 
                     } else {
                         /*// Ser ut til å fungere for uniformt strømfelt, gir ganske like resultat som superbee
@@ -521,6 +491,19 @@ public class AdvectPelletsVarCurr {
         }
 
         return sum;
+    }
+
+    private double balancingSuperbeeAdv(double dt, double dx, double c_ll, double c_l, double c_c, double c_r, double c_rr, double v_l, double v_r) {
+        // Check if current speeds differ:
+        if (Math.abs(v_l-v_r) > 1e-6) {
+            // Set both to their average:
+            double tmp = 0.5*(v_l + v_r);
+            v_l = tmp;
+            v_r = tmp;
+        }
+        // Call th ordinary superbee advector:
+        return superbeeAdv(dt, dx, c_ll, c_l, c_c, c_r, c_rr, v_l, v_r);
+
     }
 
     private double maxmod(double a, double b) {

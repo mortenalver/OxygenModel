@@ -201,7 +201,6 @@ public class InputDataNetcdf {
 
     private void computeCurrentProfileWithNoise() {
         if (currentSpeedMod2 == null) {
-            System.out.println("Initializing profile: "+currentSpeeds2[0].length);
             currentSpeedMod2 = new double[currentSpeeds2[0].length];
             currentDirMod2 = new double[currentSpeeds2[0].length];
         }

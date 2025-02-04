@@ -14,7 +14,7 @@ import java.util.Locale;
 
 public class AdvectPellets {
 
-    static int numProcessors = Math.min(20, Runtime.getRuntime().availableProcessors());
+    static int numProcessors = Math.min(40, Runtime.getRuntime().availableProcessors());
 
     static int FEEDING_KLEVEL = 0;
 
@@ -79,7 +79,6 @@ public class AdvectPellets {
         if (sourceTerm instanceof double[][][])
             distFeeding = (double[][][])sourceTerm;
         else distFeeding = null;
-
 
         // Calculate advection and diffusion, taking the mask into account only if we should simulate a tank:
         final int[] dim = new int[] {pConc.length, pConc[0].length, pConc[0][0].length};
@@ -505,11 +504,25 @@ public class AdvectPellets {
                     curDir[2][1] = current[2][1] > 0 ? 1 : -1;
 
 
-                    // Collect advection terms:
-                    advect[i][j][k] = superbeeAdv(dt, dxy, x_nb[0], x_nb[1], c_h, x_nb[2], x_nb[3], current[0][0], current[0][1])
-                            + superbeeAdv(dt, dxy, y_nb[0], y_nb[1], c_h, y_nb[2], y_nb[3], current[1][0], current[1][1])
-                            + superbeeAdv(dt, dz, z_nb[0], z_nb[1], c_h, z_nb[2], z_nb[3], current[2][0], current[2][1]);
+                    boolean simpleAdv = false;
 
+                    if (!simpleAdv) {
+                        // Collect advection terms:
+                        advect[i][j][k] = superbeeAdv(dt, dxy, x_nb[0], x_nb[1], c_h, x_nb[2], x_nb[3], current[0][0], current[0][1])
+                                + superbeeAdv(dt, dxy, y_nb[0], y_nb[1], c_h, y_nb[2], y_nb[3], current[1][0], current[1][1])
+                                + superbeeAdv(dt, dz, z_nb[0], z_nb[1], c_h, z_nb[2], z_nb[3], current[2][0], current[2][1]);
+                    }
+                    else {
+
+                        advect[i][j][k] = simpleAdv(dt, dxy, x_nb[0], x_nb[1], c_h, x_nb[2], x_nb[3], current[0][0], current[0][1])
+                                + simpleAdv(dt, dxy, y_nb[0], y_nb[1], c_h, y_nb[2], y_nb[3], current[1][0], current[1][1])
+                                + simpleAdv(dt, dz, z_nb[0], z_nb[1], c_h, z_nb[2], z_nb[3], current[2][0], current[2][1]);
+
+                        /*advect[i][j][k] = simpleAdv2(dt, dxy, x_nb[0], x_nb[1], c_h, x_nb[2], x_nb[3], current[0][0], current[0][1])
+                                + simpleAdv2(dt, dxy, y_nb[0], y_nb[1], c_h, y_nb[2], y_nb[3], current[1][0], current[1][1])
+                                + simpleAdv2(dt, dz, z_nb[0], z_nb[1], c_h, z_nb[2], z_nb[3], current[2][0], current[2][1]);*/
+
+                    }
 
                     // Collect diffusion terms:
                     diffus[i][j][k] = diffKappaXY * ((x_nb_diff[0] - 2 * c_h + x_nb_diff[1]) / dxy / dxy
@@ -569,6 +582,21 @@ public class AdvectPellets {
         }
         if (v_r < 0) {
             sum -= (c_r - c_c) * v_r;
+        }
+        return sum;
+    }
+
+    private double simpleAdv2(double dt, double dx, double c_ll, double c_l, double c_c, double c_r, double c_rr, double v_l, double v_r) {
+        double sum = 0;
+        if (v_l > 0) {
+            sum += c_l * v_l;
+        } else {
+            sum += c_c * v_l;
+        }
+        if (v_r < 0) {
+            sum -= c_r * v_r;
+        } else {
+            sum -= c_c * v_r;
         }
         return sum;
     }

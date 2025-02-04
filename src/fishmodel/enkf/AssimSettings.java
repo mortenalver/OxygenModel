@@ -7,15 +7,15 @@ public class AssimSettings {
     public double hybrid_ENOI_weight = 0.5; // Relative weighting of ENOI K matrix in hybrid setup
     public String[] enOIEnsembleFile = new String[]{
             //"C:\\Users\\alver\\Work\\BjoroyaSim\\highstorage27_06.nc"
-            "static22_06.nc",
-            "static23_06.nc",
-            "static24_06.nc",
-            "static25_06.nc",
-            "static26_06.nc",
-            "static27_06.nc",
-            "static28_06.nc",
-            "static29_06.nc",
-            "static30_06.nc"
+            "static_ensemble/static22_06.nc",
+            "static_ensemble/static23_06.nc",
+            "static_ensemble/static24_06.nc",
+            "static_ensemble/static25_06.nc",
+            "static_ensemble/static26_06.nc",
+            "static_ensemble/static27_06.nc",
+            "static_ensemble/static28_06.nc",
+            "static_ensemble/static29_06.nc",
+            "static_ensemble/static30_06.nc"
     };
 
 
