@@ -52,7 +52,7 @@ public class RunSimulationNMBU {
 
         // Save files:
         String saveDir = "./";
-        String simNamePrefix = "test_"+lokalitet; //"ff_3m_curr0.7_";
+        String simNamePrefix = "test3_"+lokalitet; //"ff_3m_curr0.7_";
         String simNamePostfix = "";
 
         boolean doMPI = false; // Will be set to true if we are running is EnKF mode using MPI
@@ -177,7 +177,9 @@ public class RunSimulationNMBU {
         double dxy = 4, dz = 4; // Model resolution (m)
         double dt = .5 * dxy; // Time step (s)
         int storeIntervalFeed = 600, storeIntervalInfo = 60;
-        double fishMaxDepth = 20; // The maximum depth of the fish under non-feeding conditions
+        boolean storeO2Histograms = true;
+
+        double fishMaxDepth = 20; // The maximum depth of the fish under non-feeding condition
 
         double currentReductionFactor = 1; // Multiplier for inside current as function of outside
         if (decreasingCurrentFactor)
@@ -442,9 +444,11 @@ public class RunSimulationNMBU {
             // Establish file names to write data to:
             NetcdfFileWriteable ncfile = null;
             NetcdfFileWriteable fishfile = null;
+            NetcdfFileWriteable histfile = null;
             String ncfilePath = saveDir + filePrefix + simNamePostfix + (doMPI ? "_"+String.format("%02d", rank) : "")+".nc";
             String fishfilePath = saveDir + filePrefix + simNamePostfix + (doMPI ? "_"+String.format("%02d", rank) : "")+"_fish.nc";
-            boolean firstStore3d = true, firstStoreScalars = true;
+            String histFilePath = saveDir + filePrefix + simNamePostfix + (doMPI ? "_"+String.format("%02d", rank) : "")+"_hist.nc";
+            boolean firstStore3d = true, firstStoreScalars = true, firstStoreHist = true;
 
             double totFeedAdded = 0;
 
@@ -742,6 +746,20 @@ public class RunSimulationNMBU {
                         }
                     }
 
+                    if (storeO2Histograms) {
+                        if (firstStoreHist) {
+                            firstStoreHist = false;
+                            histfile = SaveNetCDF.initializeHistogramFile(histFilePath, MultiCageUtils.getBinEdges(), cagePos.length, unitString);
+                        }
+                        else {
+                            try {
+                                histfile = NetcdfFileWriteable.openExisting(histFilePath);
+                            } catch (IOException e) {
+                                e.printStackTrace();
+                            }
+                        }
+                    }
+
                     double[] groupArray = new double[fish.getNGroups()];
 
                     for (int j = 0; j < fishTmp.length; j++)
@@ -814,19 +832,20 @@ public class RunSimulationNMBU {
 
                     //SaveNetCDF.saveScalarVariable(fishfile, t, "frac_hypoxia", values[2], false);
 
-                    double[][] cageStats = MultiCageUtils.getCageStats(o2, mask, cagePositions, rad, dxy,
+                    ArrayList<CageStats> cageStats = MultiCageUtils.getCageStats(o2, mask, cagePositions, rad, dxy,
                         HYPOXIA_THRESHOLD);
-                    for (int ii=0; ii<cageStats.length; ii++) {
+                    for (int ii=0; ii<cageStats.size(); ii++) {
+                        CageStats st = cageStats.get(ii);
                         SaveNetCDF.saveScalarVariable(fishfile, t, "Cage_"+(ii+1)+"_min",
-                                cageStats[ii][0], false);
+                                st.stats[0], false);
                         SaveNetCDF.saveScalarVariable(fishfile, t, "Cage_"+(ii+1)+"_perc5",
-                                cageStats[ii][1], false);
+                                st.stats[1], false);
                         SaveNetCDF.saveScalarVariable(fishfile, t, "Cage_"+(ii+1)+"_perc10",
-                                cageStats[ii][2], false);
+                                st.stats[2], false);
                         SaveNetCDF.saveScalarVariable(fishfile, t, "Cage_"+(ii+1)+"_mean",
-                                cageStats[ii][4], false);
+                                st.stats[4], false);
                         SaveNetCDF.saveScalarVariable(fishfile, t, "Cage_"+(ii+1)+"_fracHypoxia",
-                                cageStats[ii][5], false);
+                                st.stats[5], false);
 
                     }
 
@@ -846,6 +865,17 @@ public class RunSimulationNMBU {
                         fishfile.close();
                     } catch (IOException e) {
                         e.printStackTrace();
+                    }
+
+                    if (storeO2Histograms) {
+
+                        SaveNetCDF.saveHistograms(histfile, t, cageStats);
+
+                        try {
+                            histfile.close();
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
                     }
                 }
 

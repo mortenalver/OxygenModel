@@ -719,6 +719,8 @@ public class FullFarmSimulation2 {
                         SaveNetCDF.createScalarVariables(fishfile, ms.names);
                         for (int ii=0; ii<cagePositions.size(); ii++) {
                             SaveNetCDF.createScalarVariable(fishfile, "Cage_"+(ii+1)+"_min");
+                            SaveNetCDF.createScalarVariable(fishfile, "Cage_"+(ii+1)+"_perc5");
+                            SaveNetCDF.createScalarVariable(fishfile, "Cage_"+(ii+1)+"_perc10");
                             SaveNetCDF.createScalarVariable(fishfile, "Cage_"+(ii+1)+"_mean");
                             SaveNetCDF.createScalarVariable(fishfile, "Cage_"+(ii+1)+"_fracHypoxia");
                         }
@@ -803,17 +805,23 @@ public class FullFarmSimulation2 {
 
                     //SaveNetCDF.saveScalarVariable(fishfile, t, "frac_hypoxia", values[2], false);
 
-                    double[][] cageStats = MultiCageUtils.getCageStats(o2, mask, cagePositions, rad, dxy,
-                        HYPOXIA_THRESHOLD);
-                    for (int ii=0; ii<cageStats.length; ii++) {
+                    ArrayList<CageStats> cageStats = MultiCageUtils.getCageStats(o2, mask, cagePositions, rad, dxy,
+                            HYPOXIA_THRESHOLD);
+                    for (int ii=0; ii<cageStats.size(); ii++) {
+                        CageStats st = cageStats.get(ii);
                         SaveNetCDF.saveScalarVariable(fishfile, t, "Cage_"+(ii+1)+"_min",
-                                cageStats[ii][0], false);
+                                st.stats[0], false);
+                        SaveNetCDF.saveScalarVariable(fishfile, t, "Cage_"+(ii+1)+"_perc5",
+                                st.stats[1], false);
+                        SaveNetCDF.saveScalarVariable(fishfile, t, "Cage_"+(ii+1)+"_perc10",
+                                st.stats[2], false);
                         SaveNetCDF.saveScalarVariable(fishfile, t, "Cage_"+(ii+1)+"_mean",
-                                cageStats[ii][2], false);
+                                st.stats[4], false);
                         SaveNetCDF.saveScalarVariable(fishfile, t, "Cage_"+(ii+1)+"_fracHypoxia",
-                                cageStats[ii][3], false);
+                                st.stats[5], false);
 
                     }
+
 
 
                     // Save o2 level at sensor positions:
