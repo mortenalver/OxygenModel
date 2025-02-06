@@ -1,5 +1,6 @@
 package save;
 
+import fishmodel.CageStats;
 import fishmodel.Measurements;
 import ucar.ma2.*;
 import ucar.nc2.Attribute;
@@ -408,4 +409,80 @@ public class SaveNetCDF {
     }
 
 
+    public static NetcdfFileWriteable initializeHistogramFile(String f, double[] binEdges, int nCages, String timeUnits) {
+        try {
+            NetcdfFileWriteable ncfile = NetcdfFileWriteable.createNew(f);
+            createTimeDimension(ncfile);
+            ncfile.addDimension("bins", binEdges.length);
+            ncfile.addDimension("cage", nCages);
+            ncfile.create();
+            ncfile.setRedefineMode(true);
+            createTimeVariable(ncfile, timeUnits);
+
+            // Create variable containing the bin edges:
+            ArrayList<Dimension> dimensions = new ArrayList<Dimension>();
+            dimensions.add(ncfile.findDimension("bins"));
+            Variable beVar = ncfile.addVariable("bin_edges", DataType.DOUBLE, dimensions);
+            beVar.addAttribute(new Attribute("scale_factor", 1.0));
+            beVar.addAttribute(new Attribute("add_offset", 0.0));
+
+            // Create histogram variable:
+            dimensions = new ArrayList<Dimension>();
+            dimensions.add(ncfile.findDimension("time"));
+            dimensions.add(ncfile.findDimension("cage"));
+            dimensions.add(ncfile.findDimension("bins"));
+            Variable var = ncfile.addVariable("histogram", DataType.INT, dimensions);
+            var.addAttribute(new Attribute("scale_factor", 1.0));
+            var.addAttribute(new Attribute("add_offset", 0.0));
+
+            // Write bin edges values:
+            ncfile.setRedefineMode(false);
+            Array beData = Array.factory(DataType.DOUBLE, new int[] {binEdges.length});
+            for (int i=0; i<binEdges.length; i++)
+                beData.setDouble(i, binEdges[i]);
+            int[] origin = new int[] {0};
+            ncfile.write("bin_edges", origin, beData);
+
+
+            return ncfile;
+        } catch (IOException ex) {
+            ex.printStackTrace();
+            return null;
+        } catch (InvalidRangeException e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    public static void saveHistograms(NetcdfFileWriteable ncfile, double time, ArrayList<CageStats> cageStats) {
+
+        try {
+            Dimension tDim = ncfile.findDimension("time"),
+                    cageDim = ncfile.findDimension("cage"),
+                    binsDim = ncfile.findDimension("bins");
+
+            // Write time:
+            Array timeData = Array.factory(DataType.DOUBLE, new int[]{1});
+            timeData.setDouble(0, time);
+            int[] timeOrigin = new int[]{tDim.getLength()};
+            ncfile.write("time", timeOrigin, timeData);
+
+            // Write histogram values:
+            int[] dataOrigin = new int[] {tDim.getLength()-1, 0, 0};
+            ArrayInt.D3 varData = new ArrayInt.D3(1, cageDim.getLength(), binsDim.getLength());
+            for (int ci=0; ci<cageDim.getLength(); ci++) {
+                int[] histVals = cageStats.get(ci).histogram;
+                for (int bi=0; bi< binsDim.getLength(); bi++) {
+                    varData.set(0, ci, bi, histVals[bi]);
+                }
+
+            }
+            ncfile.write("histogram", dataOrigin, varData);
+
+        } catch (InvalidRangeException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
 }

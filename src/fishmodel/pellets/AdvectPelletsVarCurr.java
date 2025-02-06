@@ -1,20 +1,9 @@
 package fishmodel.pellets;
 
-import fishmodel.CageMasking;
-import fishmodel.hydraulics.SimpleTankHydraulics;
-import save.SaveNetCDF;
-import ucar.ma2.Array;
-import ucar.nc2.NetcdfFileWriteable;
 
-import java.io.IOException;
-import java.text.NumberFormat;
-import java.util.Arrays;
-import java.util.Locale;
+public class AdvectPelletsVarCurr {
 
-
-public class AdvectPellets {
-
-    static int numProcessors = Math.min(40, Runtime.getRuntime().availableProcessors());
+    static int numProcessors = Math.min(20, Runtime.getRuntime().availableProcessors());
 
     static int FEEDING_KLEVEL = 0;
 
@@ -80,6 +69,7 @@ public class AdvectPellets {
             distFeeding = (double[][][])sourceTerm;
         else distFeeding = null;
 
+
         // Calculate advection and diffusion, taking the mask into account only if we should simulate a tank:
         final int[] dim = new int[] {pConc.length, pConc[0].length, pConc[0][0].length};
         if (advect == null) {
@@ -102,9 +92,7 @@ public class AdvectPellets {
             @Override
             public void run() {
 
-                //calcAdvectAndDiff(dim, kstart, kend, pConc, dxy, dz, useWalls ? mask : null, sinkingSpeed, diffKappaXY, currentSpeed,
-                //        currentSpeedOffset, ambientValue);
-                calcAdvectAndDiff2(dim, kstart, kend, pConc, dxy, dz, useWalls ? mask : null, sinkingSpeed, diffKappaXY, diffKappaZ,
+                calcAdvectAndDiff(dim, kstart, kend, pConc, dxy, dz, useWalls ? mask : null, sinkingSpeed, diffKappaXY, diffKappaZ,
                         currentSpeed, currentSpeedOffset, ambientValue, dt);
 
                 for (int k=kstart; k<kend; k++)
@@ -214,152 +202,10 @@ public class AdvectPellets {
     }
 
     /**
-     * Advection using a basic upstream scheme.
      */
     protected void calcAdvectAndDiff(int[] dim, int kstart, int kend, double[][][] feed, double dxy, double dz, boolean[][][] mask, double sinkingSpeed,
-                                     double diffKappa, double[][][][] currentSpeed, double[] currentSpeedOffset, double[] ambientValue) {
-        double[][][] nbr = new double[3][3][5];
-        // Third dimension of nbr: above(diff), above(adv), same, below
-
-
-
-        for (int k=kstart; k<kend; k++)
-            for (int i=0; i<feed.length; i++)
-                for (int j=0; j<feed[0].length; j++) {
-                    // Skip if outside:
-                    if ((mask != null) && !mask[i][j][k]) {
-                        advect[i][j][k] = 0;
-                        diffus[i][j][k] = 0;
-                        continue;
-                    }
-
-                    // Get local currents. For each dimension we need the current on two edges:
-                    double[][] current = new double[3][2];
-                    current[0][0] = currentSpeed[i][j][k][0] + currentSpeedOffset[0];
-                    current[1][0] = currentSpeed[i][j][k][1] + currentSpeedOffset[1];
-                    current[2][0] = currentSpeed[i][j][k][2] + currentSpeedOffset[2] + sinkingSpeed;
-                    current[0][1] = currentSpeed[i+1][j][k][0] + currentSpeedOffset[0];
-                    current[1][1] = currentSpeed[i][j+1][k][1] + currentSpeedOffset[1];
-                    current[2][1] = currentSpeed[i][j][k+1][2] + currentSpeedOffset[2] + sinkingSpeed;
-
-                    // If feed is going upwards, stop at surface:
-                    //if (k == 0 && current[2][0] < 0)
-                    //    current[2][0] = 0;
-
-
-                    //*** Defining cell neighbourhood:
-                    nbr[1][1][2] = feed[i][j][k];
-
-                    // Horizontal, -1 in x direction:
-                    if (i == 0)
-                        nbr[0][1][2] = ambientValue[k];
-                    else {
-                        nbr[0][1][2] = feed[i-1][j][k];
-                        if ((mask != null) && !mask[i-1][j][k]) {
-                            current[0][0] = 0;
-                            nbr[0][1][2] = nbr[1][1][2];
-                        }
-                    }
-                    // Horizontal, +1 in x direction:
-                    //System.out.println("i = "+i);
-                    //System.out.println("j = "+j);
-                    //System.out.println("k = "+k);
-                    if (i == dim[0]-1)
-                        nbr[2][1][2] = ambientValue[k];
-                    else {
-                        nbr[2][1][2] = feed[i+1][j][k];
-                        if ((mask != null) && !mask[i+1][j][k]) {
-                            current[0][1] = 0;
-                            nbr[2][1][2] = nbr[1][1][2];
-                        }
-                    }
-                    // Horizontal, -1 in y direction:
-                    if (j == 0)
-                        nbr[1][0][2] = ambientValue[k];
-                    else {
-                        nbr[1][0][2] = feed[i][j-1][k];
-                        if ((mask != null) && !mask[i][j-1][k]) {
-                            current[1][0] = 0;
-                            nbr[1][0][2] = nbr[1][1][2];
-                        }
-                    }
-                    // Horizontal, +1 in y direction:
-                    if (j == dim[1]-1)
-                        nbr[1][2][2] = ambientValue[k];
-                    else {
-                        nbr[1][2][2] = feed[i][j+1][k];
-                        if ((mask != null) && !mask[i][j+1][k]) {
-                            current[1][1] = 0;
-                            nbr[1][2][2] = nbr[1][1][2];
-                        }
-                    }
-
-                    // Above:
-                    if (k == 0) {
-                        nbr[1][1][0] = feed[i][j][k]; // For diffusion
-                        nbr[1][1][1] = 0.; // For advection
-                    }
-                    else {
-                        nbr[1][1][0] = feed[i][j][k-1];
-                        nbr[1][1][1] = feed[i][j][k-1];
-                    }
-
-                    // Below:
-                    if (k == dim[2]-1) {
-                        nbr[1][1][3] = ambientValue[k]; // By bottom
-                        nbr[1][1][4] = ambientValue[k]; // By bottom
-                    }
-                    else {
-                        nbr[1][1][3] = feed[i][j][k+1];
-                        nbr[1][1][4] = feed[i][j][k+1];
-                        /*if ((mask != null) && !mask[i][j][k+1]) {
-                            current[2][1] = 0;
-                            nbr[1][1][3] = nbr[1][1][2];
-                        } */
-                    }
-
-                    // Note current directions:
-                    int[][] curDir = new int[3][2];
-                    curDir[0][0] = current[0][0] > 0 ? 1 : -1;
-                    curDir[1][0] = current[1][0] > 0 ? 1 : -1;
-                    curDir[2][0] = current[2][0] > 0 ? 1 : -1;
-                    curDir[0][1] = current[0][1] > 0 ? 1 : -1;
-                    curDir[1][1] = current[1][1] > 0 ? 1 : -1;
-                    curDir[2][1] = current[2][1] > 0 ? 1 : -1;
-
-
-                    /*if (k==25) {
-                        System.out.println("current[2][0]="+current[2][0]+" current[2][1]"+current[2][1]);
-                        System.out.println("nbr[1][1][1]="+nbr[1][1][1]+" nbr[1][1][2]="+nbr[1][1][2]+" nbr[1][1][4]="+nbr[1][1][4]);
-                        System.out.println("ambientValue = "+ambientValue[k]);
-                    } */
-                    // Collect advection terms:
-                    advect[i][j][k] = (1/dxy)*
-                            (((current[0][0] > 0) ? current[0][0]*nbr[0][1][2] : current[0][0]*nbr[1][1][2])
-                            +((current[0][1] < 0) ? -current[0][1]*nbr[2][1][2] : -current[0][1]*nbr[1][1][2])
-                            +((current[1][0] > 0) ? current[1][0]*nbr[1][0][2] : current[1][0]*nbr[1][1][2])
-                            +((current[1][1] < 0) ? -current[1][1]*nbr[1][2][2] : -current[1][1]*nbr[1][1][2]))
-                           + (1/dz)*
-                            (((current[2][0] > 0) ? current[2][0]*nbr[1][1][1] : current[2][0]*nbr[1][1][2])
-                            +((current[2][1] < 0) ? -current[2][1]*nbr[1][1][4] : -current[2][1]*nbr[1][1][2]));
-
-
-
-
-
-                    // Collect diffusion terms:
-                    diffus[i][j][k] = diffKappa*((nbr[2][1][2] - 2*nbr[1][1][2] + nbr[0][1][2])/dxy/dxy
-                        +(nbr[1][2][2] - 2*nbr[1][1][2] + nbr[1][0][2])/dxy/dxy
-                        +(nbr[1][1][3] - 2*nbr[1][1][2] + nbr[1][1][0])/dz/dz);
-                }
-
-    }
-
-    /** Advection using subgrid model with superbee slope limiter to reduce numerical diffusion:
-     */
-    protected void calcAdvectAndDiff2(int[] dim, int kstart, int kend, double[][][] feed, double dxy, double dz, boolean[][][] mask, double sinkingSpeed,
-                                      double diffKappaXY, double diffKappaZ, double[][][][] currentSpeed, 
-                                      double[] currentSpeedOffset, double[] ambientVals, double dt) {
+                                     double diffKappaXY, double diffKappaZ, double[][][][] currentSpeed,
+                                     double[] currentSpeedOffset, double[] ambientVals, double dt) {
         //double[][][] nbr = new double[5][5][7];
         boolean masking = mask != null;
         double c_h;
@@ -386,26 +232,20 @@ public class AdvectPellets {
 
                             //double[] vecHere = new double[]{((double) i) - ambRedCenter[0], ((double) j) - ambRedCenter[1]};
                             double ambRedValue = 0, ambRedValue2 = 0, multiplier = 0;
-                            //double tmp1 = 0, tmp2 = 0;
                             double[] currHere = new double[] {currentSpeed[i][j][k][0] + currentSpeedOffset[0],
                                     currentSpeed[i][j][k][1] + currentSpeedOffset[1]};
                             double currHereSpeed = 100.*Math.sqrt(currHere[0]*currHere[0]+currHere[1]*currHere[1]);
-                            //double multiplier = 1.1*Math.max(0.5, Math.min(2.5, 0.35*(7.4-currHereSpeed)));
                             double omega_red = 0.35;
                             if (currHereSpeed < 6)
                                 omega_red = 1.85 - 0.25*currHereSpeed;
 
                             ambRedValue = ((double)(dim[0] - i)/((double)dim[0])) * omega_red * affinityProfile[k];
 
-
-
                             for (int ii = 0; ii < ambientValHere.length; ii++)
                                 ambientValHere[ii] -= ambRedValue;
-
                         }
-
-
                     }
+
                     // Get local currents. For each dimension we need the current on two edges:
                     double[][] current = new double[3][2];
                     current[0][0] = currentSpeed[i][j][k][0] + currentSpeedOffset[0];
@@ -414,7 +254,6 @@ public class AdvectPellets {
                     current[0][1] = currentSpeed[i + 1][j][k][0] + currentSpeedOffset[0];
                     current[1][1] = currentSpeed[i][j + 1][k][1] + currentSpeedOffset[1];
                     current[2][1] = currentSpeed[i][j][k + 1][2] + sinkingSpeed + currentSpeedOffset[2];
-
 
                     //*** Defining cell neighbourhood:
                     c_h = feed[i][j][k];
@@ -504,32 +343,72 @@ public class AdvectPellets {
                     curDir[2][1] = current[2][1] > 0 ? 1 : -1;
 
 
-                    boolean simpleAdv = false;
+                    /*if (i==5 && j==15 && k==1) {
+                        System.out.println("x: "+current[0][0]+" , "+current[0][1]+" , diff: "+(current[0][0]-current[0][1]));
+                        System.out.println("y: "+current[1][0]+" , "+current[1][1]+" , diff: "+(current[1][0]-current[1][1]));
+                        System.out.println("balance: "+(current[0][0]-current[0][1]+current[1][0]-current[1][1]));
+                        double temp = superbeeAdv(dt, dxy, x_nb[0], x_nb[1], c_h, x_nb[2], x_nb[3], current[0][0], current[0][1]);
+                        System.out.println("adv contribution: "+temp);
+                        System.out.println("");
+                    }*/
 
-                    if (!simpleAdv) {
-                        // Collect advection terms:
-                        advect[i][j][k] = superbeeAdv(dt, dxy, x_nb[0], x_nb[1], c_h, x_nb[2], x_nb[3], current[0][0], current[0][1])
+                    // Collect advection terms:
+                    boolean simpleA = false;//i==7 && j==19 && k==20 && counter==3;
+
+                    if (!simpleA) {
+
+                        /*if (i==36 && j==36 && k==0) {
+                            System.out.println("x_nb[1]="+x_nb[1]+", c_h="+c_h+", x_nb[2]="+x_nb[2]+", 1/dxy="+(1/dxy));
+                            System.out.println("advX = "+superbeeAdv(dt, dxy, x_nb[0], x_nb[1], c_h, x_nb[2], x_nb[3], current[0][0], current[0][1]));
+                            System.out.println("advY = "+superbeeAdv(dt, dxy, y_nb[0], y_nb[1], c_h, y_nb[2], y_nb[3], current[1][0], current[1][1]));
+                            System.out.println("advZ = "+superbeeAdv(dt, dz, z_nb[0], z_nb[1], c_h, z_nb[2], z_nb[3], current[2][0], current[2][1]));
+                        }*/
+
+                        /*advect[i][j][k] = superbeeAdv(dt, dxy, x_nb[0], x_nb[1], c_h, x_nb[2], x_nb[3], current[0][0], current[0][1])
                                 + superbeeAdv(dt, dxy, y_nb[0], y_nb[1], c_h, y_nb[2], y_nb[3], current[1][0], current[1][1])
                                 + superbeeAdv(dt, dz, z_nb[0], z_nb[1], c_h, z_nb[2], z_nb[3], current[2][0], current[2][1]);
-                    }
-                    else {
+                         */
+                        advect[i][j][k] = balancingSuperbeeAdv(dt, dxy, x_nb[0], x_nb[1], c_h, x_nb[2], x_nb[3], current[0][0], current[0][1])
+                                + balancingSuperbeeAdv(dt, dxy, y_nb[0], y_nb[1], c_h, y_nb[2], y_nb[3], current[1][0], current[1][1])
+                                + balancingSuperbeeAdv(dt, dz, z_nb[0], z_nb[1], c_h, z_nb[2], z_nb[3], current[2][0], current[2][1]);
+
+                    } else {
+                        /*// Ser ut til å fungere for uniformt strømfelt, gir ganske like resultat som superbee
+                        advect[i][j][k] = (1 / dxy) *
+                                (((current[0][0] > 0) ? current[0][0] * x_nb[1] : current[0][0] * c_h)
+                                        + ((current[0][1] < 0) ? -current[0][1] * x_nb[2] : -current[0][1] * c_h)
+                                        + ((current[1][0] > 0) ? current[1][0] * y_nb[1] : current[1][0] * c_h)
+                                        + ((current[1][1] < 0) ? -current[1][1] * y_nb[2] : -current[1][1] * c_h))
+                                + (1 / dz) *
+                                (((current[2][0] > 0) ? current[2][0] * z_nb[1] : current[2][0] * c_h)
+                                        + ((current[2][1] < 0) ? -current[2][1] * z_nb[2] : -current[2][1] * c_h));*/
 
                         advect[i][j][k] = simpleAdv(dt, dxy, x_nb[0], x_nb[1], c_h, x_nb[2], x_nb[3], current[0][0], current[0][1])
                                 + simpleAdv(dt, dxy, y_nb[0], y_nb[1], c_h, y_nb[2], y_nb[3], current[1][0], current[1][1])
                                 + simpleAdv(dt, dz, z_nb[0], z_nb[1], c_h, z_nb[2], z_nb[3], current[2][0], current[2][1]);
 
-                        /*advect[i][j][k] = simpleAdv2(dt, dxy, x_nb[0], x_nb[1], c_h, x_nb[2], x_nb[3], current[0][0], current[0][1])
-                                + simpleAdv2(dt, dxy, y_nb[0], y_nb[1], c_h, y_nb[2], y_nb[3], current[1][0], current[1][1])
-                                + simpleAdv2(dt, dz, z_nb[0], z_nb[1], c_h, z_nb[2], z_nb[3], current[2][0], current[2][1]);*/
+                        /*if ((i== 37 && j==37 && k==0)) {
+                            System.out.println("x_nb[1]="+x_nb[1]+", c_h="+c_h+", x_nb[2]="+x_nb[2]+", 1/dxy="+(1/dxy));
+                            System.out.println("advX = "+simpleAdv(dt, dxy, x_nb[0], x_nb[1], c_h, x_nb[2], x_nb[3], current[0][0], current[0][1]));
+                            System.out.println("advY = "+simpleAdv(dt, dxy, y_nb[0], y_nb[1], c_h, y_nb[2], y_nb[3], current[1][0], current[1][1]));
+                            System.out.println("advZ = "+simpleAdv(dt, dz, z_nb[0], z_nb[1], c_h, z_nb[2], z_nb[3], current[2][0], current[2][1]));
+                            System.out.println("1");
+                        }*/
 
                     }
 
+
                     // Collect diffusion terms:
+
                     diffus[i][j][k] = diffKappaXY * ((x_nb_diff[0] - 2 * c_h + x_nb_diff[1]) / dxy / dxy
                             + (y_nb_diff[0] - 2 * c_h + y_nb_diff[1]) / dxy / dxy)
                             + diffKappaZ * ((z_nb_diff[0] - 2 * c_h + z_nb_diff[1]) / dz / dz);
 
-
+                    /*if (i==36 && j==36 && k==0) {
+                        System.out.println("Value: "+feed[i][j][k]);
+                        System.out.println("Advect: "+advect[i][j][k]);
+                        System.out.println("Diffus: "+diffus[i][j][k]);
+                    }*/
                 }
         }
     }
@@ -586,21 +465,6 @@ public class AdvectPellets {
         return sum;
     }
 
-    private double simpleAdv2(double dt, double dx, double c_ll, double c_l, double c_c, double c_r, double c_rr, double v_l, double v_r) {
-        double sum = 0;
-        if (v_l > 0) {
-            sum += c_l * v_l;
-        } else {
-            sum += c_c * v_l;
-        }
-        if (v_r < 0) {
-            sum -= c_r * v_r;
-        } else {
-            sum -= c_c * v_r;
-        }
-        return sum;
-    }
-
     private double superbeeAdv(double dt, double dx, double c_ll, double c_l, double c_c, double c_r, double c_rr, double v_l, double v_r) {
         double sum = 0;
         if (v_l >= 0) {
@@ -627,6 +491,19 @@ public class AdvectPellets {
         }
 
         return sum;
+    }
+
+    private double balancingSuperbeeAdv(double dt, double dx, double c_ll, double c_l, double c_c, double c_r, double c_rr, double v_l, double v_r) {
+        // Check if current speeds differ:
+        if (Math.abs(v_l-v_r) > 1e-6) {
+            // Set both to their average:
+            double tmp = 0.5*(v_l + v_r);
+            v_l = tmp;
+            v_r = tmp;
+        }
+        // Call th ordinary superbee advector:
+        return superbeeAdv(dt, dx, c_ll, c_l, c_c, c_r, c_rr, v_l, v_r);
+
     }
 
     private double maxmod(double a, double b) {
