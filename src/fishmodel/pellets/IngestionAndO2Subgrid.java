@@ -1,9 +1,11 @@
 package fishmodel.pellets;
 
+
 /**
  * Calculate pellet ingestion by fish according to the model of Alver et al. (2004).
+ * This variant operates on a subgrid representing one cage in a multi-cage setup
  */
-public class IngestionAndO2Tempprofile {
+public class IngestionAndO2Subgrid {
 
     final static double
         T_h = 12, // Handling time
@@ -31,22 +33,29 @@ public class IngestionAndO2Tempprofile {
     // U: swimming speed (body lengths/s)
 
     public static double[] calculateIngestion(double dt, double[][][] feed, double[][][] o2, double[][][] affinity, double[][][] o2Affinity, double o2AffSum,
-                                              int availableCellsForO2Uptake,
+                                              int[][] ranges,
                                               double[][][] ingDist, double[][][] o2ConsDist, double dxy, double dz, boolean[][][] mask, double pelletWeight,
                                               double[] T_w, SimpleFish fish, double o2Cons_perturb) {
         double N = fish.getTotalN();
         double WtotKg = 0.001*fish.getTotalW();
+        //System.out.println("N="+N+" / totW="+WtotKg);
         if (N == 0)
-            return new double[] {0, 0};
+            return new double[] {0, 0, 0};
 
+        // x and y ranges for calculation:
+        int x0 = ranges[0][0],
+                x1 = ranges[0][1],
+                y0 = ranges[1][0],
+                y1 = ranges[1][1];
 
         double totalFeed = 0;
-        for (int i=0; i<feed.length; i++)
-            for (int j=0; j<feed[0].length; j++)
+        for (int i=x0; i<x1; i++)
+            for (int j=y0; j<y1; j++)
                 for (int k=0; k<feed[0][0].length; k++)
                     if ((mask == null) || mask[i][j][k]) {
                         totalFeed += affinity[i][j][k]*feed[i][j][k];
                     }
+
         boolean feeding = totalFeed > 1e-3;
 
         double w_0 = feeding ? 1./(T_h + k_T_s*N*pelletWeight/totalFeed) : 0;
@@ -57,8 +66,8 @@ public class IngestionAndO2Tempprofile {
         double cellVol = dxy*dxy*dz; // Cell volume in m3
         double maxDensity = 0;
         if (feeding)
-            for (int i=0; i<feed.length; i++)
-                for (int j=0; j<feed[0].length; j++)
+            for (int i=x0; i<x1; i++)
+                for (int j=y0; j<y1; j++)
                     for (int k=0; k<feed[0][0].length; k++)
                         if ((mask == null) || mask[i][j][k]) {
                             double wHere = WtotKg*affinity[i][j][k]*feed[i][j][k]/totalFeed;
@@ -68,20 +77,13 @@ public class IngestionAndO2Tempprofile {
                                 maxDensity = density;
                             muSum += wHere*mu(density);
 
+
                         }
         double rho = feeding ? muSum/WtotKg : 0;
 
-        // TODO: need to find good way to model effect of o2 level on appetite
-        //double o2Thresh = -70;
-        //double o2AppetiteMult = 1.0;
-        /*if (o2PercAverage < o2Thresh)
-            o2AppetiteMult = Math.max(0, o2PercAverage/o2Thresh);*/
-
-        //System.out.println("o2PercAverage = "+o2PercAverage);
-        //System.out.println("MaxDensity = "+maxDensity);
-
         // Confusion factor:
-        double p_c = Math.pow(rho, b);
+        double p_c = rho > 0 ? Math.pow(rho, b) : 0;
+
 
         double[] p_a = new double[fish.getNGroups()];
         double totalW = fish.getTotalW();
@@ -105,9 +107,10 @@ public class IngestionAndO2Tempprofile {
 
             w_f[i] = pelletWeight*w_0*p_c*p_a[i]*p_h;
             totalIntake += fish.getN(i)*w_f[i];
+
             //System.out.println("w_f["+i+"] = "+w_f[i]);
         }
-        //System.out.println("Total intake = "+totalIntake);
+
         if (totalIntake == 0)
             feeding = false;
         //System.out.println("Relative removal = "+totalIntake*dt/totalFeed);
@@ -115,6 +118,7 @@ public class IngestionAndO2Tempprofile {
         if (dt*totalIntake > totalFeed) {
             double multiplier = totalIntake > 0 ? totalFeed / (dt * totalIntake) : 0;
             totalIntake *= multiplier;
+            //System.out.println("Multiplier: "+multiplier);
             for (int i = 0; i < fish.getNGroups(); i++) {
                 w_f[i] *= multiplier;
 
@@ -125,36 +129,52 @@ public class IngestionAndO2Tempprofile {
         double[][][] cellIng = new double[feed.length][feed[0].length][feed[0][0].length];
         double sumCellIng = 0;
         double correction = 1;
+        double finalScaling = 1.0;
         if (feeding) {
-            for (int i=0; i<feed.length; i++)
-                for (int j=0; j<feed[0].length; j++)
-                    for (int k=0; k<feed[0][0].length; k++) {
+            for (int i = x0; i < x1; i++)
+                for (int j = y0; j < y1; j++)
+                    for (int k = 0; k < feed[0][0].length; k++) {
                         // Remove same relative fraction of feed everywhere:
-                        cellIng[i][j][k] = affinity[i][j][k]*totalIntake*feed[i][j][k]/totalFeed;
+                        cellIng[i][j][k] = affinity[i][j][k] * totalIntake * feed[i][j][k] / totalFeed;
                         sumCellIng += cellIng[i][j][k];
 
-
                     }
-            correction = sumCellIng > 0 ? totalIntake/sumCellIng : 0;
+            correction = sumCellIng > 0 ? totalIntake / sumCellIng : 0;
+            //System.out.println("Correction: "+correction);
+            // Remove feed from cells:
+            double removed = 0;
+            for (int i = x0; i < x1; i++)
+                for (int j = y0; j < y1; j++)
+                    for (int k = 0; k < feed[0][0].length; k++) {
+                        if ((mask == null) || mask[i][j][k]) {
+                            double toRemove = Math.min(feed[i][j][k], dt * correction * cellIng[i][j][k]);
+                            feed[i][j][k] -= toRemove;
+                            removed += toRemove;
+                            if (ingDist != null) ingDist[i][j][k] = correction * cellIng[i][j][k];
+                        }
+
+                        if (Double.isNaN(feed[i][j][k])) {
+                            System.out.println("NaN");
+                        }
+                    }
+
+            //System.out.println("Relative feed removal success: "+removed/(dt*correction*totalIntake));
+            if (removed < dt*correction*totalIntake) {
+                finalScaling = removed/(dt*correction*totalIntake);
+                totalIntake *= finalScaling;
+            }
         }
 
-        // Remove feed from cells:
-        for (int i=0; i<feed.length; i++)
-            for (int j=0; j<feed[0].length; j++)
-                for (int k=0; k<feed[0][0].length; k++) {
-                    if ((mask == null) || mask[i][j][k]) {
-
-                        feed[i][j][k] -= dt*correction*cellIng[i][j][k];
-                        if (ingDist != null) ingDist[i][j][k] = correction*cellIng[i][j][k];
-                    }
-                }
 
         // Oxygen consumption.
         // Step 1: compute the affinity-dependent distribution of the fish with regard to oxygen.
-        // betaBar should sum up to 1.0. Each element gives the fraction of O2 ingesting fish in one cell
+        // betaBar should sum up to 1.0, however this doesn't hold when looking at a subgrid. Therefore
+        // we use 1/sumbb as a correction factor when we use the betaBar values.
+        // Each element gives the fraction of O2 ingesting fish in one cell
+        double sumbb = 0; // Sum of all betaBar values. Its inverse is used as correction factor.
         double[][][] betaBar = new double[o2.length][o2[0].length][o2[0][0].length];
-        for (int i=0; i<feed.length; i++)
-            for (int j=0; j<feed[0].length; j++)
+        for (int i=x0; i<x1; i++)
+            for (int j=y0; j<y1; j++)
                 for (int k=0; k<feed[0][0].length; k++) {
 
                     if ((mask == null) || mask[i][j][k]) {
@@ -169,15 +189,15 @@ public class IngestionAndO2Tempprofile {
                             betaBar[i][j][k] += (o2Affinity[i][j][k] / o2AffSum);
                         }
                     }
-
+                    sumbb += betaBar[i][j][k];
                 }
+        //System.out.println("sum betabar = "+sumbb);
 
         // Step 2: cycle through all cells, and compute the O2 consumption given the amount of fish and temperature
         // in that cell
-        double bbsum = 0.;
         double presum=0., postsum = 0.;
-        for (int i=0; i<feed.length; i++)
-            for (int j=0; j<feed[0].length; j++)
+        for (int i=x0; i<x1; i++)
+            for (int j=y0; j<y1; j++)
                 for (int k=0; k<feed[0][0].length; k++) {
                     if ((mask == null) || mask[i][j][k]) {
                         double consHere = 0;
@@ -185,8 +205,7 @@ public class IngestionAndO2Tempprofile {
                             consHere += o2consumptionMult*(1.0 + o2Cons_perturb)*fish.getN(kg)*0.001*fish.getW(kg)*61.6*Math.pow(fish.getW(kg)
                                     *0.001, -0.33)*Math.pow(1.03, T_w[k])*Math.pow(1.79, U)/3600.0;
                         }
-                        consHere *= betaBar[i][j][k];
-                        bbsum += betaBar[i][j][k];
+                        consHere *= betaBar[i][j][k]/sumbb;
                         presum += o2[i][j][k];
                         // TODO: negative o2 values are simply cut off, no reduction of consumption when o2 is low
                         // Since O2 is given as a concentration (mg/l), we need to divide by the cell volume in l:
@@ -198,13 +217,16 @@ public class IngestionAndO2Tempprofile {
                     }
                 }
 
+
         double o2ConsumptionRate = (presum-postsum)*1000.0*dxy*dxy*dz/dt; // mg o2 removed from volume per second
+
+        //System.out.println("consSum="+consSum+" , consRate="+o2ConsumptionRate);
 
         // Add feed to stomachs:
         for (int i=0; i<fish.getNGroups(); i++) {
             fish.stepGutContent(i, dt, T_w[0]);
-            fish.addIngestion(i, dt*w_f[i]);
-            fish.setIngRate(i, w_f[i]);
+            fish.addIngestion(i, dt*w_f[i]*finalScaling);
+            fish.setIngRate(i, w_f[i]*finalScaling);
         }
 
         return new double[] {totalIntake, rho, o2ConsumptionRate};

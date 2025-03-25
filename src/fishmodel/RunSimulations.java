@@ -260,15 +260,6 @@ public class RunSimulations {
             ambientValueO2[i] = avO2;
         }
 
-        // If we are running in EnKF mode, let rank 0 initialize the EnKF class:
-        if (doMPI && (rank==0)) {
-            enKF = new EnsembleKF(simNamePrefix, cageDims, as.nPar, dxy, ms);
-        }
-
-        if (!doMPI && as.useEnOI) {
-            enOI = new EnOI(as, cageDims, dxy, ms);
-        }
-
         // Set up initial perturbation and parameter values:
         double ambientO2_perturb = 0;
         double[] current_perturb = new double[2];
@@ -293,6 +284,16 @@ public class RunSimulations {
         for (int sim=0; sim<nSim; sim++) {
             if (sim<startAt)
                 continue;
+
+            // If we are running in EnKF mode, let rank 0 initialize the EnKF class:
+            if (doMPI && (rank==0)) {
+                enKF = new EnsembleKF(simNamePrefix, cageDims, as.nPar, dxy, ms);
+            }
+
+            if (!doMPI && as.useEnOI) {
+                enOI = new EnOI(as, cageDims, dxy, ms);
+            }
+
             int feedingPeriodPiv = 0;
             boolean isFeeding = false;
 

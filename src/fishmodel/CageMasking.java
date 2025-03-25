@@ -38,6 +38,36 @@ public class CageMasking {
         return mask;
     }
 
+    /**
+     * Create masking for a straight rectangular unit.
+     * @param dims Grid dimensions
+     * @param dxy Horizontal grid size
+     * @param unitSizeM Dimensions of unit (m)
+     * @return
+     */
+    public static boolean[][][] rectangularMasking(int[] dims, double dxy, double dz, double[] unitSizeM, boolean maskBottom) {
+        boolean[][][] mask = new boolean[dims[0]][dims[1]][dims[2]];
+        // Find center of grid:
+        double[] center = new double[2];
+        for (int i=0; i<2; i++)
+            center[i] = ((double)(dims[i]-1))/2.0;
+
+        for (int i=0; i<dims[0]; i++)
+            for (int j=0; j<dims[1]; j++) {
+                double distX = Math.abs((double)i - center[0]),
+                        distY = Math.abs((double)j- center[1]);
+                boolean inside = (distX*dxy <= unitSizeM[0]/2) && (distY*dxy <= unitSizeM[1]/2);
+                for (int k=0; k<dims[2]-1; k++) {
+                    if (((double)k+0.5)*dz <= unitSizeM[2])
+                        mask[i][j][k] = inside;
+                }
+                if (maskBottom)
+                    mask[i][j][dims[2]-1] = false;
+                else mask[i][j][dims[2]-1] = inside;
+            }
+
+        return mask;
+    }
 
     /**
      * Create masking for a cylindro-conical tank (typical fish cage shape).
@@ -105,6 +135,53 @@ public class CageMasking {
                     if (inside) {
                         for (int k = 0; k < dims[2] - 1; k++)
                             mask[i][j][k] = true;
+                    }
+                }
+        }
+
+        return mask;
+    }
+
+    /**
+     * Create masking for farm containing a grid of spaghetti cages with given positions and radii
+     * @param dims Grid dimensions
+     * @param dxy Horizontal grid size
+     * @param radius Radius of cylinder at surface and at mid ring
+     * @param depth Depth to mid ring and to bottom of cage
+     * @return
+     */
+    public static boolean[][][] fullFarmMaskingSpaghetti(int[] dims, double dxy, double dz, ArrayList<double[]> cagePos, double[] radius, double[] depth, boolean maskBottom) {
+        boolean[][][] mask = new boolean[dims[0]][dims[1]][dims[2]];
+        // Initialize without cages first:
+        for (int i=0; i<dims[0]; i++)
+            for (int j=0; j<dims[1]; j++) {
+                for (int k = 0; k < dims[2]; k++)
+                    mask[i][j][k] = false;
+            }
+
+        for (double[] pos : cagePos) {
+            for (int i = 0; i < dims[0]; i++)
+                for (int j = 0; j < dims[1]; j++) {
+                    double distX = (double) i - (pos[0]/dxy),
+                            distY = (double) j - (pos[1]/dxy);
+                    double rpos = dxy * Math.sqrt(distX * distX + distY * distY);
+                    boolean inside = rpos <= radius[0]; // Check if inside at the surface
+                    if (inside) {
+                        for (int k = 0; k < dims[2] - 1; k++) {
+                            double dHere = dz*(0.5 + k);
+                            if (dHere < depth[0]) {
+                                // We are above the mid ring
+                                double radHere = radius[0] - (radius[0]-radius[1])*(dHere/depth[0]);
+                                //System.out.println("k="+k+", dHere="+dHere+", radHere="+radHere);
+                                mask[i][j][k] = rpos <= radHere;
+                            }
+                            else if (dHere < depth[1]) {
+                                // We are between mid ring and bottom
+                                double radHere = radius[1]*((depth[1]-dHere)/(depth[1]-depth[0]));
+                                //System.out.println("k="+k+", dHere="+dHere+", radHere="+radHere);
+                                mask[i][j][k] = rpos <= radHere;
+                            }
+                        }
                     }
                 }
         }

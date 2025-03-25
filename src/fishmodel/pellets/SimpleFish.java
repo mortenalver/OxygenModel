@@ -92,6 +92,8 @@ public class SimpleFish {
     public void addIngestion(int group, double ingestion) {
         this.V[group] += ingestion;
         this.ingested[group] += ingestion;
+
+
     }
 
     public void stepGutContent(int group, double dt, double T_w) {

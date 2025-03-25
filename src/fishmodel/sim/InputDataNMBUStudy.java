@@ -14,8 +14,9 @@ public class InputDataNMBUStudy {
     private Date[] times;
     private Long[] ltime;
 
-    private double[][] currentSpeeds, currentDirs, temps;
-    private double[] currentSpeedMod =null, currentDirMod =null, tempMod=null, currentDepths=null;
+    private double[][] currentSpeeds, currentDirs, temps, o2vals;
+    private double[] currentSpeedMod =null, currentDirMod =null, tempMod=null, currentDepths=null,
+        o2depths=null, o2Mod=null;
 
     long sTime = 0l;
     private int piv = -1;
@@ -38,17 +39,20 @@ public class InputDataNMBUStudy {
             Variable direction = ncfile.findVariable("extCurrentDir");
             //Variable o2amb5 = ncfile.findVariable(useInstantaneousAmbientVals ? "O2ambient_5" : "O2constAmbient_5");
             Variable temp = ncfile.findVariable("temperature");
+            Variable o2 = ncfile.findVariable("O2ambient");
 
             // Get shape of time variable:
             int[] shape = time.getShape();
 
             // Check if we have 1 series of current data, or multiple layers:
             int[] currentShape = spd.getShape();
+            int[] o2Shape = o2.getShape();
 
             ArrayDouble.D1 tdata = (ArrayDouble.D1) time.read(new int[]{0}, shape);
             ArrayDouble.D2 csdata = (ArrayDouble.D2) spd.read(new int[]{0, 0}, currentShape);
             ArrayDouble.D2 cddata = (ArrayDouble.D2) direction.read(new int[]{0, 0}, currentShape);
             ArrayDouble.D2 tempdata = (ArrayDouble.D2) temp.read(new int[]{0, 0}, currentShape);
+            ArrayDouble.D2 o2data = (ArrayDouble.D2) o2.read(new int[]{0, 0}, o2Shape);
 
             // Read depth layers for current profiles:
             Variable zc = ncfile.findVariable("zc");
@@ -58,11 +62,20 @@ public class InputDataNMBUStudy {
                 currentDepths[i] = zcAD.get(i);
             }
 
+            // Read depth layers for o2 profiles:
+            Variable zc_o2 = ncfile.findVariable("zc_o2");
+            ArrayDouble.D1 zc_o2_AD = (ArrayDouble.D1) zc_o2.read(new int[]{0}, zc_o2.getShape());
+            o2depths = new double[zc_o2.getShape(0)];
+            for (int i=0; i<o2depths.length; i++) {
+                o2depths[i] = zc_o2_AD.get(i);
+            }
+
             times = new Date[shape[0]];
             ltime = new Long[shape[0]];
             currentSpeeds = new double[currentShape[0]][currentShape[1]];
             currentDirs = new double[currentShape[0]][currentShape[1]];
             temps = new double[currentShape[0]][currentShape[1]];
+            o2vals = new double[o2Shape[0]][o2Shape[1]];
             for (int i=0; i<times.length; i++) {
                 ltime[i] = (1000*Math.round(tdata.get(i) * 86400 - 7200)); // Subtracting two hours since Java assumes GMT, but it is given in Norwegian summer time.
                 times[i] = new Date(ltime[i]);
@@ -70,13 +83,17 @@ public class InputDataNMBUStudy {
             }
             for (int i=0; i<times.length; i++) {
                 for (int j=0; j<currentShape[1]; j++) {
-
                     currentSpeeds[i][j] = csdata.get(i,j);
                     currentDirs[i][j] = cddata.get(i,j);
                     temps[i][j] = tempdata.get(i,j);
                 }
             }
 
+            for (int i=0; i<times.length; i++) {
+                for (int j=0; j<o2Shape[1]; j++) {
+                    o2vals[i][j] = o2data.get(i,j);
+                }
+            }
 
             ncfile.close();
         } catch (
@@ -121,12 +138,16 @@ public class InputDataNMBUStudy {
             currentSpeedMod = new double[currentSpeeds[0].length];
             currentDirMod = new double[currentSpeeds[0].length];
             tempMod = new double[currentSpeeds[0].length];
+            o2Mod = new double[o2depths.length];
         }
         for (int i = 0; i< currentSpeeds[0].length; i++) {
             currentSpeedMod[i] = currentSpeeds[piv][i];
             currentDirMod[i] = currentDirs[piv][i];
             //System.out.println("i="+i+", speed="+currentSpeedMod[i]+", dir="+currentDirMod[i]);
             tempMod[i] = temps[piv][i];
+        }
+        for (int i=0; i<o2vals[0].length; i++) {
+            o2Mod[i] = o2vals[piv][i];
         }
     }
 
@@ -146,7 +167,8 @@ public class InputDataNMBUStudy {
     }
 
     public double getO2Ambient5() {
-        return 9.;
+
+        return o2Mod[0];
     }
 
     public double getO2Ambient10() {

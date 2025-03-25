@@ -118,6 +118,8 @@ public class AdvectPellets {
                             newValues[i][j][k] = pConc[i][j][k] + dt*(advect[i][j][k] + diffus[i][j][k]);
                             postSum += newValues[i][j][k];
 
+                            /*if (newValues[i][j][k] < 0)
+                                System.out.println("BBB");*/
                             /*if (newValues[i][j][k] < 0) {
                                 System.out.println("negative result: i="+i+", j="+j+", k="+k);
                                 System.out.println("counter = "+counter);
@@ -135,6 +137,9 @@ public class AdvectPellets {
                             if (distFeeding != null) {
                                 newValues[i][j][k] = newValues[i][j][k] + dt * feedingRateMult * distFeeding[i][j][k];
                             }
+
+                            /*if (newValues[i][j][k] < 0)
+                                System.out.println("CCC: "+newValues[i][j][k]);*/
 
                         }
             }

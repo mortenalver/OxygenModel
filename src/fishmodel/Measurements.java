@@ -16,6 +16,24 @@ public class Measurements {
         public double std = 0;
     }
 
+    public static MeasurementSet setupSensorPositionsProhavOcean(int[] cageDims, double dxy, double dz,
+                                                                 double[] unitSizeM) {
+        MeasurementSet ms = new MeasurementSet();
+        ms.std = 0.1;
+        ms.names = new String[] {"C_5", "C_10", "C_15"};
+        double[] o2Depth = new double[] {5, 10, 15};
+        ms.pos = new int[ms.names.length][3];
+        for (int i=0; i<ms.names.length; i++) {
+            int xDist = (int)(cageDims[0]/2);
+            int yDist = (int)(cageDims[1]/2);
+            int zDist = (int)(o2Depth[i]/dz);
+            ms.pos[i][0] = xDist;
+            ms.pos[i][1] = yDist;
+            ms.pos[i][2] = zDist;
+        }
+        return ms;
+    }
+
     public static MeasurementSet setupSensorPositionsBjoroya(int[] cageDims, double dxy, double dz, double rad) {
         MeasurementSet ms = new MeasurementSet();
         ms.std = 0.1;
