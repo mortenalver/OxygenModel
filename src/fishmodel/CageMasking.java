@@ -43,9 +43,11 @@ public class CageMasking {
      * @param dims Grid dimensions
      * @param dxy Horizontal grid size
      * @param unitSizeM Dimensions of unit (m)
+     * @param cageSubmergeM How many m the cage is submerged (0 means not submerged)
      * @return
      */
-    public static boolean[][][] rectangularMasking(int[] dims, double dxy, double dz, double[] unitSizeM, boolean maskBottom) {
+    public static boolean[][][] rectangularMasking(int[] dims, double dxy, double dz, double[] unitSizeM,
+                                                   double cageSubmergeM, boolean maskBottom) {
         boolean[][][] mask = new boolean[dims[0]][dims[1]][dims[2]];
         // Find center of grid:
         double[] center = new double[2];
@@ -58,7 +60,8 @@ public class CageMasking {
                         distY = Math.abs((double)j- center[1]);
                 boolean inside = (distX*dxy <= unitSizeM[0]/2) && (distY*dxy <= unitSizeM[1]/2);
                 for (int k=0; k<dims[2]-1; k++) {
-                    if (((double)k+0.5)*dz <= unitSizeM[2])
+                    double depth = ((double)k+0.5)*dz;
+                    if ((depth >= cageSubmergeM) && (depth <= (unitSizeM[2]+cageSubmergeM)))
                         mask[i][j][k] = inside;
                 }
                 if (maskBottom)

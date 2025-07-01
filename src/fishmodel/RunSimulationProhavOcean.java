@@ -47,12 +47,20 @@ public class RunSimulationProhavOcean {
         Random rnd = new Random();
 
         // Modelloppløsning:
-        double dxy = 4, dz = 4; // Model resolution (m)
+        double dxy = 3, dz = 3; // Model resolution (m)
+
+        // Nedsenket og hvor mye:
+        double cageSubmergeM = 0.*20;
+        boolean cageSubmerged = cageSubmergeM>0; // True if cage is submerged, false otherwise
+
+        // Fish density:
+        double kgPerM3 = 15;
+
         String resStr = String.valueOf(dxy);
 
         // Save files:
-        String saveDir = "./";
-        String simNamePrefix = "test_"+resStr+"m_";
+        String saveDir = "./output/";
+        String simNamePrefix = "anim_"+((int)kgPerM3)+"kg_"+resStr+"m"+(cageSubmerged ? "_subm" : "");
         String simNamePostfix = "";
 
         boolean doMPI = false; // Will be set to true if we are running is EnKF mode using MPI
@@ -89,7 +97,7 @@ public class RunSimulationProhavOcean {
 
         boolean varyAmbient = false; // Reduction in ambient values towards the rest of the farm
 
-        boolean useVerticalDist = true;
+        boolean useVerticalDist = false;
 
 
         boolean useCurrentMagic = false; // Use spatially variable current flow field
@@ -101,7 +109,8 @@ public class RunSimulationProhavOcean {
         boolean includeHypoxiaAvoidance = true;
         int checkAvoidanceInterval = 30, checkAvoidanceCount = 0;
 
-        int year = 2021, month = Calendar.SEPTEMBER, day = 27;
+        int year = 2021, month = Calendar.SEPTEMBER, day = 1;
+        int nSim = 1; // Number of days to simulate (separate sims)
 
         // If we are not running in MPI mode, we check the first argument whether it indicates a number of
         // days to add to the start date (if we are running in MPI mode the arguments actually contain
@@ -112,6 +121,8 @@ public class RunSimulationProhavOcean {
                     year = Integer.parseInt(args[0]);
                     month = Integer.parseInt(args[1])-1; // Month is zero-based, so subtract 1
                     day = Integer.parseInt(args[2]); // ... while day isn't
+
+                    nSim = 1; // If start date is specified, simulate one day only
                 } catch (NumberFormatException e) {
                     throw new RuntimeException(e);
                 }
@@ -120,22 +131,22 @@ public class RunSimulationProhavOcean {
 
         // Simulation start time:
         int initYear = year, initMonth = month, initDate = day, initHour = 0, initMin = 0, initSec = 0;
-        double t_end = 12*3600;//1*24*3600; // Duration of simulation
-        int nSim = 1; // Number of days to simulate (separate sims)
-        int startAt = 0; // Set to >0 to skip one of more simulations, but count them in the sim numbering
+        double t_end = 24*3600;//1*24*3600; // Duration of simulation
+
+        int startAt = 0; // Set to >0 to skip one or more simulations, but count them in the sim numbering
 
         // Domain settings and farm layout:
         int [] cageGrid=null;
         int[][] cagePos=null;
         double outerPadding = 75; // Ekstra rom utenfor rammefortøyningene
         double farmRotation = 0; // Current directions should be rotated by -1 times this angle
-        int[] feedStartEnd = new int[] {12*3600, 17*3600};
+        int[] feedStartEnd = new int[] {8*3600, 17*3600};
 
         double[] unitSizeM = new double[] {210, 60, 60}; // Length, width and depth of cage
         cageGrid = new int[] {1, 1};
         cagePos = new int[][] {{0, 0}};
-        farmRotation = 0; // Current directions should be rotated by -1 times this angle
-
+        farmRotation = -25+0*90; // Current directions should be rotated by -1 times this angle
+        // -25 is perpendicular to the main current direction. Add 90 to place the farm along that direction.
 
 
         // Sensor depths (all horizontal positions will be equipped with sensors at all depths:
@@ -144,8 +155,9 @@ public class RunSimulationProhavOcean {
         double[] sensorAngles = new double[] {128.2948, 2.8445, 246.8427};
 
         double[] domainDims = new double[] {2*outerPadding + unitSizeM[0]*cageGrid[0],
-                2*outerPadding + unitSizeM[2]*cageGrid[1]};
-        System.out.println("Domain dims (m): "+domainDims[0]+" x "+domainDims[1]);
+                2*outerPadding + unitSizeM[1]*cageGrid[1],
+                unitSizeM[2] + cageSubmergeM};
+        System.out.println("Domain dims (m): "+domainDims[0]+" x "+domainDims[1]+ " x "+domainDims[2]);
         ArrayList<double[]> cagePositions = new ArrayList<>();
         for (int i=0; i<cagePos.length; i++) {
             cagePositions.add(new double[] {outerPadding + unitSizeM[0]*((double)(cagePos[i][0]) +0.5),
@@ -157,14 +169,13 @@ public class RunSimulationProhavOcean {
 
 
         double dt = .5 * dxy; // Time step (s)
-        int storeIntervalFeed = 240/*7200*/, storeIntervalInfo = 60;
+        int storeIntervalFeed = 600/*7200*/, storeIntervalInfo = 60;
         boolean storeO2Histograms = true;
-        double depthDomain = 38;
 
         System.out.println("Resolution: "+dxy+" , "+dz);
 
 
-        double fishMaxDepth = 38; // The maximum depth of the fish under non-feeding condition
+        double fishMaxDepth = 60;//38; // The maximum depth of the fish under non-feeding condition
 
         double currentReductionFactor = 0.8; // Multiplier for inside current as function of outside
 
@@ -202,21 +213,47 @@ public class RunSimulationProhavOcean {
         // Set up cage dimensions and cage grid:
         cageDims[0] = (int)Math.ceil(domainDims[0]/dxy);
         cageDims[1] = (int)Math.ceil(domainDims[1]/dxy);
-        cageDims[2] = (int)Math.ceil(depthDomain/dz)+1;
-        mask = CageMasking.rectangularMasking(cageDims, dxy, dz, unitSizeM, false);
+        cageDims[2] = (int)Math.ceil(domainDims[2]/dz)+1;
+        mask = CageMasking.rectangularMasking(cageDims, dxy, dz, unitSizeM, cageSubmergeM, false);
         boolean useWalls = false;
 
         System.out.println("Domain dimensions: ("+cageDims[0]+", "+cageDims[1]+", "+cageDims[2]+")");
 
-        // Feeding setup:
-        int[][] feedingPos = new int[cagePositions.size()][2];
-        for (int i=0; i<cagePositions.size(); i++) {
-            double[] cp = cagePositions.get(i);
-            feedingPos[i][0] = (int)Math.round(cp[0]/dxy);
+        /*// Feeding setup (multiple surface spreaders):
+        int[][] feedingPos = new int[5][2];
+        for (int i=0; i<feedingPos.length; i++) {
+            int offset = i-2;
+            double[] cp = cagePositions.get(0); // Only one cage, but several feeding positions
+            feedingPos[i][0] = (int)Math.round((cp[0]+offset*unitSizeM[0]/5)/dxy);
             feedingPos[i][1] = (int)Math.round(cp[1]/dxy);
             System.out.println("Feeding pos "+i+": "+feedingPos[i][0]+" / "+feedingPos[i][1]);
-        }
+        }*/
 
+        // Feeding positions (underwater:
+        double[][] posFromCenterM = new double[][] {{-10, -10}, {-10, 10}, {10, -10}, {10, 10},
+                {-30, -10}, {-30, 10}, {30, -10}, {30, 10},
+                {-50, -10}, {-50, 10}, {50, -10}, {50, 10},
+                {-70, -10}, {-70, 10}, {70, -10}, {70, 10},
+                {-90, -10}, {-90, 10}, {90, -10}, {90, 10}};
+        double xScale = 0.9;
+        double[] feedDepth = new double[] { 7, 19 }; // According to OF1 report, feeding depth at 6-7 m
+        int nFeedPos = feedDepth.length*posFromCenterM.length;
+        double divis = (double)(nFeedPos);
+        int[][] feedingPos = new int[nFeedPos][3];
+        int piv = 0;
+        double[] pos = cagePositions.get(0);
+        int fpiv=0;
+        for (int vi=0; vi<feedDepth.length; vi++) {
+            int feedLayer = (int)Math.round((feedDepth[vi]+cageSubmergeM)/dz);
+            for (int j = 0; j < posFromCenterM.length; j++) {
+                double posX = pos[0] + xScale * posFromCenterM[j][0];
+                double posY = pos[1] + posFromCenterM[j][1];
+                feedingPos[fpiv][0] = (int) Math.round(posX / dxy);
+                feedingPos[fpiv][1] = (int) Math.round(posY / dxy);
+                feedingPos[fpiv][2] = feedLayer;
+                fpiv+=1;
+            }
+        }
         // Feeding periods (start/end in s):
         // Fra Eskil (Bjørøya): måltidene varte fra ca. kl. 07:30-17:30, i gjennomsnitt.
         int[][] feedingPeriods = new int[][] {{feedStartEnd[0], feedStartEnd[1]},
@@ -247,7 +284,7 @@ public class RunSimulationProhavOcean {
 
 
         // Oxygen sensor positions:
-        Measurements.MeasurementSet ms = Measurements.setupSensorPositionsProhavOcean(cageDims, dxy, dz, unitSizeM);
+        Measurements.MeasurementSet ms = Measurements.setupSensorPositionsProhavOcean(cageDims, dxy, dz, unitSizeM, cageSubmergeM);
 
         // Feed affinity:
         double[][][] affinity = new double[cageDims[0]][cageDims[1]][cageDims[2]];
@@ -266,27 +303,40 @@ public class RunSimulationProhavOcean {
 
         // O2 affinity:
         // Vertical distribution data based on telemetry (8 individuals):
-        double[] affProfile_orig = new double[] {0.0110, 0.0913, 0.8601, 2.1406, 2.7774, 2.6903, 2.5195, 2.2987, 2.0137,
+        double[] affProfile_orig = new double[] {0., 0.0110, 0.0913, 0.8601, 2.1406, 2.7774, 2.6903, 2.5195, 2.2987, 2.0137,
                 1.7448, 1.5883, 1.3667, 1.2348, 1.0724, 0.9379, 0.7764, 0.7104, 0.5895, 0.5607, 0.4668, 0.3933,
                 0.4009, 0.2935, 0.1801, 0.1260, 0.0787, 0.0457, 0.0304};
 
         double[] affProfile_flat = new double[] {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
         double[] affProfile = useVerticalDist ? affProfile_orig : affProfile_flat;
 
 
-        double[] affDepths = new double[] {0.5000, 1.5000, 2.5000, 3.5000, 4.5000, 5.5000, 6.5000, 7.5000, 8.5000,
+        double[] affDepths = new double[] {0., 0.5000, 1.5000, 2.5000, 3.5000, 4.5000, 5.5000, 6.5000, 7.5000, 8.5000,
                 9.5000, 10.5000, 11.5000, 12.5000, 13.5000, 14.5000, 15.5000, 16.5000, 17.5000, 18.5000, 19.5000,
                 20.5000, 21.5000, 22.5000, 23.5000, 24.5000, 25.5000, 26.5000, 27.5000};
+        double affDepthsMult = 2.5;//1;//2;
         /*double[] affProfile = new double[] {1, 1};
         double[] affDepths = new double[] {0, 30};*/
-        double[] affinityProfile = new double[cageDims[2]];
-        interpolateVertical(affinityProfile, affDepths, affProfile, cageDims[2], dz);
 
-        /*for (int i = 0; i < affinityProfile.length; i++) {
+        for (int i = 0; i < affDepths.length; i++) {
+            affDepths[i] *= affDepthsMult;
+        }
+
+        // If submerged, the following lines simply translate the affinity profile downwards as far as the submerge depth:
+        if (cageSubmerged) {
+            for (int i = 0; i < affDepths.length; i++) {
+                affDepths[i] += cageSubmergeM;
+            }
+        }
+
+        double[] affinityProfile = new double[cageDims[2]];
+        interpolateVertical(affinityProfile, affDepths, affProfile_orig, cageDims[2], dz);
+
+        for (int i = 0; i < affinityProfile.length; i++) {
             double v = affinityProfile[i];
             System.out.println("Affinity: "+v);
-        }*/
+        }
         double[][][] o2Affinity = new double[cageDims[0]][cageDims[1]][cageDims[2]];
         double o2AffSum = setO2AffinityWithVerticalProfile(cageDims, dz, fishMaxDepth, mask, affinityProfile, o2Affinity, affinity);
         int availableCellsForO2Uptake = countAvailableCellsForOxygenUptake(cageDims, dz, fishMaxDepth, mask);
@@ -359,16 +409,20 @@ public class RunSimulationProhavOcean {
             InputDataNMBUStudy inData = new InputDataNMBUStudy(inDataFile);
             inData.setStartTime(startTime);
 
-            SimpleFish fish = new SimpleFish(4e6, 4500, 0.1*4500); // TODO: oppdater!!!
+            double volume = unitSizeM[0]*unitSizeM[1]*unitSizeM[2];
+            double totBiomassG = kgPerM3*1000*volume;
+            double meanWeightG = 5000;
+            System.out.println("N fish: "+totBiomassG/meanWeightG);
+            SimpleFish fish = new SimpleFish(totBiomassG/meanWeightG, meanWeightG, 0.1*meanWeightG);
 
             double[][][] fishTmp = new double[fish.getNGroups()][1][1];
 
             // Determine nominal feeding rate:
-            double nominalFeedingRate = cagePositions.size()*2900.*1000/(10*3600);
+            double nominalFeedingRate = cagePositions.size()*totBiomassG*0.01/(10*3600);
+            System.out.println("Feeding rate = "+nominalFeedingRate);
 
 
             double feedingRateMult = 0; // Set each timestep
-            System.out.println("Feeding rate = "+nominalFeedingRate);
 
             NumberFormat nf = NumberFormat.getNumberInstance(Locale.US);
             nf.setMaximumFractionDigits(2);
@@ -379,22 +433,25 @@ public class RunSimulationProhavOcean {
             double[][][] o2 = new double[cageDims[0]][cageDims[1]][cageDims[2]];
             double[][][] ingDist = new double[cageDims[0]][cageDims[1]][cageDims[2]];
             double[][][] o2consDist = new double[cageDims[0]][cageDims[1]][cageDims[2]];
-            System.out.println("Initial ambient: "+inData.getO2Ambient5());
+            //System.out.println("Initial ambient: "+inData.getO2Ambient5());
+
             AdvectPellets.initField(o2, inData.getO2Ambient5());//avO2);
             AdvectPellets.initField(ingDist, 0);
             double outFlow = 0., outFlow_net = 0.;
 
             // Initialize O2 field based on first ambient values:
-            //double[] ambVal = new double[] {inData.getO2Ambient5(), inData.getO2Ambient10(), inData.getO2Ambient15()};
-            //interpolateVertical(ambientValueO2, new double[] {5, 10, 15}, ambVal, cageDims[2], dz);
-            /*for (int i=0; i<cageDims[0]; i++)
+            //double[] ambVal = new double[] {inData.getO2Ambient5()};//, inData.getO2Ambient10(), inData.getO2Ambient15()};
+            double[] ambVal = inData.getO2ValuesAllDepths();
+            double[] o2Depths = inData.getO2Depths();
+            interpolateVertical(ambientValueO2, o2Depths, ambVal, cageDims[2], dz);
+            for (int i=0; i<cageDims[0]; i++)
                 for (int j=0; j<cageDims[1]; j++)
                     for (int k=0; k<cageDims[2]; k++) {
                         o2[i][j][k] = ambientValueO2[k];
-                    }*/
+                    }
 
 
-            // Setup of surface feeding:
+            /*// Setup of surface feeding:
             double[][][] feedingRate = new double[cageDims[0]][cageDims[1]][cageDims[2]];
             double[][] fTemp = new double[cageDims[0]][cageDims[1]];
 
@@ -413,7 +470,15 @@ public class RunSimulationProhavOcean {
             for (int i=0; i<surfFeed.length; i++)
                 for (int j=0; j<surfFeed[i].length; j++) {
                     feedingRate[i][j][0] = surfFeed[i][j]/totFeed;//((double)feedingPos.length);
-                }
+                }*/
+
+            // Underwater point feeding:
+            double[][][] feedingRate = new double[cageDims[0]][cageDims[1]][cageDims[2]];
+            for (int i=0; i<nFeedPos; i++) {
+                feedingRate[feedingPos[i][0]][feedingPos[i][1]][feedingPos[i][2]] = 1./divis;
+            }
+
+
             sourceTerm = feedingRate;
 
 
@@ -441,7 +506,7 @@ public class RunSimulationProhavOcean {
                 double tMin = t / 60;
 
                 if (inData.advance(t) || (i==0)) {
-                    System.out.println("Updating environment: t = "+t);
+                    //System.out.println("Updating environment: t = "+t);
 
                     double[] obsCurrentDepths = inData.getCurrentDepths();
                     double[] tempVal = inData.getTemperatureProfile();
@@ -454,9 +519,11 @@ public class RunSimulationProhavOcean {
                         System.out.println("i="+j+", interpolated T="+ambientTemp[j]);
                     }*/
 
-                    double[] ambVal = new double[]{inData.getO2Ambient5()};//, inData.getO2Ambient10(), inData.getO2Ambient15()};
+                    ambVal = inData.getO2ValuesAllDepths();
+                    interpolateVertical(ambientValueO2, o2Depths, ambVal, cageDims[2], dz);
+                    /*ambVal = new double[]{inData.getO2Ambient5()};//, inData.getO2Ambient10(), inData.getO2Ambient15()};
                     for (int j=0; j<ambientValueO2.length; j++)
-                        ambientValueO2[j] = ambVal[0];
+                        ambientValueO2[j] = ambVal[0];*/
 
                     //ambVal[0] = 9; ambVal[1] = 9; ambVal[2] = 9;
                     //double[] ambVal = {2., 10., 5.};
@@ -480,8 +547,8 @@ public class RunSimulationProhavOcean {
                             obsCurrentComp2 = new double[obsCurrentProfile.length];
 
 
-                    System.out.println("orig dir="+(obsCurrentDirProfile[0])+" / orig spd="+
-                            obsCurrentProfile[0]);
+                    /*System.out.println("orig dir="+(obsCurrentDirProfile[0])+" / orig spd="+
+                            obsCurrentProfile[0]);*/
 
                     // TODO: Since the model domain is rotated we need to adjust the direction to compensate.
                     for (int j = 0; j < obsCurrentComp1.length; j++) {
@@ -490,6 +557,8 @@ public class RunSimulationProhavOcean {
                         obsCurrentComp2[j] = currentReductionFactor*
                                 obsCurrentProfile[j]*Math.cos((obsCurrentDirProfile[j]-farmRotation)*Math.PI/180.);
                     }
+
+                    //System.out.println("comp1="+obsCurrentComp1[0]+" / comp2="+obsCurrentComp2[0]);
                     //System.out.println("u="+obsCurrentComp1[0]+" / v="+obsCurrentComp2[0]+" / origdir="+obsCurrentDirProfile[0]+", farmrotation="+farmRotation);
                     /*for (int j = 0; j < obsCurrentComp1.length; j++) {
                         System.out.println("i="+j+", u="+obsCurrentComp1[j]+" / v="+obsCurrentComp2[j]);

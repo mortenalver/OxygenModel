@@ -137,6 +137,7 @@ public class MultiCageUtils {
         //System.out.println("Sum bin values: "+sumBins);
         //System.out.println("Number of values: "+allVals2.length);
 
+        //System.out.println("Mean: "+(sum/((double)totCells)));
         return new CageStats(new double[] {min, allVals2[totCells/20], allVals2[totCells/10], max, sum/((double)totCells), ((double)cellsBelow)/((double)totCells)},
                 histValues);
     }

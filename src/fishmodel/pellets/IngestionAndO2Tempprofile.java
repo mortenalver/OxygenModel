@@ -5,6 +5,7 @@ package fishmodel.pellets;
  */
 public class IngestionAndO2Tempprofile {
 
+    private static boolean addDigestiveO2Cons = false;
     final static double
         T_h = 12, // Handling time
         k_T_s = 1., // Factor for what feed particle count related to fish count makes search time important
@@ -12,7 +13,7 @@ public class IngestionAndO2Tempprofile {
         c = 0.5; // Exponent for f_d factor
 
 
-    final static double o2consumptionMult = 1.2*1.3; // This factor can be used to globally multiply the o2 consumption of the fish.
+    public static double o2consumptionMult = 1.2*1.3; // This factor can be used to globally multiply the o2 consumption of the fish.
 
     static double U = 1; // Swimming speed (body lengths/s)
 
@@ -23,6 +24,11 @@ public class IngestionAndO2Tempprofile {
     // according to part 2.
     // Ocean Farm 1: 0.75
     static double o2_even_fraction = 0.75;//0.5;
+
+
+    public static void setAddDigestiveO2Cons(boolean value) {
+        IngestionAndO2Tempprofile.addDigestiveO2Cons = value;
+    }
 
     // O2 consumption (Grøttum and Sigholt, 1998):
     //    VO2 (mg/kg/h) = 61.6 * BW^0.33 * 1.03^T * 1.79^U
@@ -182,8 +188,18 @@ public class IngestionAndO2Tempprofile {
                     if ((mask == null) || mask[i][j][k]) {
                         double consHere = 0;
                         for (int kg=0; kg< fish.getNGroups(); kg++) {
-                            consHere += o2consumptionMult*(1.0 + o2Cons_perturb)*fish.getN(kg)*0.001*fish.getW(kg)*61.6*Math.pow(fish.getW(kg)
+
+                            double o2ConsumptionGandS = o2consumptionMult*fish.getN(kg)*0.001*fish.getW(kg)*61.6*Math.pow(fish.getW(kg)
                                     *0.001, -0.33)*Math.pow(1.03, T_w[k])*Math.pow(1.79, U)/3600.0;
+
+                            if (addDigestiveO2Cons) {
+                                // Get rate of O2 consumption from digestion in g/s per individual. Multiply by N:
+                                double digO2Cons = fish.getN(kg)*fish.calcDigestiveO2Cons(kg, T_w[k]);
+
+                                o2ConsumptionGandS += digO2Cons;
+                            }
+
+                            consHere += (1.0 + o2Cons_perturb)*o2ConsumptionGandS;
                         }
                         consHere *= betaBar[i][j][k];
                         bbsum += betaBar[i][j][k];

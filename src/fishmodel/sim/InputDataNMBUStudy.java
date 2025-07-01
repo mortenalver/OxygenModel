@@ -115,6 +115,8 @@ public class InputDataNMBUStudy {
 
         computeCurrent();
 
+        System.out.println("Initial O2 ambient: "+getO2Ambient5());
+
     }
 
     public boolean advance(double time) {
@@ -167,15 +169,32 @@ public class InputDataNMBUStudy {
     }
 
     public double getO2Ambient5() {
-
+        /*System.out.println("o2mod: ");
+        for (int i = 0; i < o2Mod.length; i++) {
+            double v = o2Mod[i];
+            System.out.println(o2depths[i]+" : "+v);
+        }*/
         return o2Mod[0];
     }
 
-    public double getO2Ambient10() {
-        return 9.;
+    public double getO2Ambient15() {
+        if (Double.isNaN(o2Mod[1]))
+            return o2Mod[0];
+        else
+            return o2Mod[1];
     }
 
-    public double getO2Ambient15() {
-        return 9.;
+    public double getO2Ambient30() {
+        if (Double.isNaN(o2Mod[2]))
+            return o2Mod[0];
+        else
+            return o2Mod[2];
+    }
+
+    public double[] getO2Depths() {
+        return o2depths;
+    }
+    public double[] getO2ValuesAllDepths() {
+        return o2Mod;
     }
 }

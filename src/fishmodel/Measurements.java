@@ -14,10 +14,26 @@ public class Measurements {
         public int[][] pos;
 
         public double std = 0;
+
+        public void addMeasurement(String name, int[] newPos) {
+            String[] tmpNames = new String[names.length + 1];
+            int[][] tmpPos = new int[names.length +1][3];
+            for (int i=0; i<names.length; i++) {
+                tmpNames[i] = names[i];
+                for (int j=0; j<3; j++)
+                    tmpPos[i][j] = pos[i][j];
+            }
+            tmpNames[names.length] = name;
+            for (int j=0; j<3; j++)
+                tmpPos[names.length][j] = newPos[j];
+
+            names = tmpNames;
+            pos = tmpPos;
+        }
     }
 
     public static MeasurementSet setupSensorPositionsProhavOcean(int[] cageDims, double dxy, double dz,
-                                                                 double[] unitSizeM) {
+                                                                 double[] unitSizeM, double cageSubmergeM) {
         MeasurementSet ms = new MeasurementSet();
         ms.std = 0.1;
         ms.names = new String[] {"C_5", "C_10", "C_15"};
@@ -26,7 +42,7 @@ public class Measurements {
         for (int i=0; i<ms.names.length; i++) {
             int xDist = (int)(cageDims[0]/2);
             int yDist = (int)(cageDims[1]/2);
-            int zDist = (int)(o2Depth[i]/dz);
+            int zDist = (int)((o2Depth[i]+cageSubmergeM)/dz);
             ms.pos[i][0] = xDist;
             ms.pos[i][1] = yDist;
             ms.pos[i][2] = zDist;
@@ -137,6 +153,56 @@ public class Measurements {
     }
 
     public static MeasurementSet setupSensorPositionsAllCages(double dxy, double dz, double rad,
+                                                              double[] sensorDepths,
+                                                              double[] sensorAngles, double farmRotation, boolean includeExtPos,
+                                                              double frameSize,
+                                                              ArrayList<double[]> cagePositions) {
+        MeasurementSet ms = new MeasurementSet();
+        ms.std = 0.1;
+
+        int nSensors = cagePositions.size()*(1 + sensorAngles.length)*sensorDepths.length;
+        ms.names = new String[nSensors];
+        ms.pos = new int[nSensors][3];
+
+        int piv = 0;
+        int xDist, yDist, zDist;
+        for (int i=0; i<cagePositions.size(); i++) {
+            for (int j=0; j<sensorDepths.length; j++) {
+                // Center:
+                ms.names[piv] = "Cage_"+(i+1)+"_C_"+(int)sensorDepths[j];
+                xDist = (int) (cagePositions.get(i)[0] / dxy);
+                yDist = (int) (cagePositions.get(i)[1] / dxy);
+                zDist = (int) (sensorDepths[j] / dz);
+                ms.pos[piv][0] = xDist;
+                ms.pos[piv][1] = yDist;
+                ms.pos[piv][2] = zDist;
+                piv++;
+
+                // Outer ring:
+                for (int k=0; k<sensorAngles.length; k++) {
+                    ms.names[piv] = "Cage_"+(i+1)+"_M"+(k+1)+"_"+(int)sensorDepths[j];
+                    double radfrac = 0.98;
+                    xDist = (int) (radfrac*rad*Math.sin(Math.PI*(sensorAngles[k]-farmRotation)/180.) / dxy + cagePositions.get(i)[0]/dxy);
+                    yDist = (int) (radfrac*rad*Math.cos(Math.PI*(sensorAngles[k]-farmRotation)/180.) / dxy + cagePositions.get(i)[1]/dxy);
+                    zDist = (int) (sensorDepths[j] / dz);
+                    ms.pos[piv][0] = xDist;
+                    ms.pos[piv][1] = yDist;
+                    ms.pos[piv][2] = zDist;
+                    piv++;
+                }
+            }
+        }
+
+        for (int i = 0; i < ms.names.length; i++) {
+            String name = ms.names[i];
+
+            System.out.println(name+"\t "+ms.pos[i][0]+", "+ms.pos[i][1]+", "+ms.pos[i][2]);
+        }
+
+        return ms;
+    }
+
+    public static MeasurementSet setupSensorPositionsNMBU(double dxy, double dz, double rad,
                                                               double[] sensorDepths,
                                                               double[] sensorAngles, double farmRotation, boolean includeExtPos,
                                                               double frameSize,
