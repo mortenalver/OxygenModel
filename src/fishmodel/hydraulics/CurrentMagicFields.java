@@ -41,8 +41,8 @@ public class CurrentMagicFields {
                 thetas[i] = thetasD.get(i);
             d_theta = thetas[1]-thetas[0];
 
-            /*for (int i=0; i<angShape[0]; i++)
-                System.out.println(thetas[i]);*/
+            for (int i=0; i<angShape[0]; i++)
+                System.out.println(thetas[i]);
 
             cfieldsU = new double[shape[1]][shape[2]][shape[0]];
             cfieldsV = new double[shape[1]][shape[2]][shape[0]];
@@ -63,7 +63,7 @@ public class CurrentMagicFields {
 
             ncfile.close();
 
-            /*double angle;
+            double angle;
             angle = 0; System.out.println("angle: "+angle+", index: "+chooseField(angle));
             angle = 5; System.out.println("angle: "+angle+", index: "+chooseField(angle));
             angle = 105; System.out.println("angle: "+angle+", index: "+chooseField(angle));
@@ -71,7 +71,7 @@ public class CurrentMagicFields {
             angle = -1; System.out.println("angle: "+angle+", index: "+chooseField(angle));
             angle = 359; System.out.println("angle: "+angle+", index: "+chooseField(angle));
             angle = -11; System.out.println("angle: "+angle+", index: "+chooseField(angle));
-
+            /*
             double[][][][] test = new double[shape[1]][shape[2]][3][3];
             double[] directions = new double[] {135, 45, 270};
             double[] speeds = new double[] {5, 2, 3};
@@ -155,6 +155,7 @@ public class CurrentMagicFields {
                 best = Math.abs(theta-thetas[i]);
             }
         }
+        //System.out.println("Chosen field: "+bestI);
         return bestI;
     }
 

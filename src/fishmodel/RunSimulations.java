@@ -495,7 +495,7 @@ public class RunSimulations {
                                 lSpeeds = new double[cageDims[2]];
                         for (int j = 0; j < cageDims[2]; j++) {
                             lSpeeds[j] = Math.sqrt(interpProfile1[j]*interpProfile1[j] + interpProfile2[j]*interpProfile2[j]);
-                            lDirections[j] = Math.atan2(interpProfile1[j], interpProfile2[j])*180./Math.PI;
+                            lDirections[j] = 90.-Math.atan2(interpProfile1[j], interpProfile2[i])*180./Math.PI;
 
                         }
                         cmf.setCurrentField(hydro, lSpeeds, lDirections);

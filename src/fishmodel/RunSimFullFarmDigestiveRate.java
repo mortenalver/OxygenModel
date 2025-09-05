@@ -37,7 +37,7 @@ public class RunSimFullFarmDigestiveRate {
     public static LinearInterpolator interpol = new LinearInterpolator();
 
     /**
-     * Setup for NMBU oxygen study
+     * Setup for digestive oxygen study
      */
     public static void main(String[] args) {
 
@@ -49,17 +49,27 @@ public class RunSimFullFarmDigestiveRate {
 
         // Modelloppløsning:
         double dxy = 2., dz = 2.; // Model resolution (m)
-        String resStr = String.valueOf(dxy);
 
         boolean isControlSim = false;
         // Toggle whether we run the Bjørøya case or the artificial case
         boolean useBjoroyaData = false;
 
+        boolean simulateStarving = true;
+
         // Save files:
         String saveDir = "./output_dig/";
-        String simNamePrefix = isControlSim ? "contr1" : "digtest1";
-        if (!useBjoroyaData)
-            simNamePrefix = "art_"+simNamePrefix;
+        String simNamePrefix;
+        if (useBjoroyaData) {
+            // Bjørøya scenario:
+            simNamePrefix = isControlSim ? "contr_60" : "digtest_60";
+        } else {
+            // Artificial scenario:
+            simNamePrefix = isControlSim ? "art_contr_2m" : "art_digtest_2m";
+        }
+        if (simulateStarving)
+            simNamePrefix = simNamePrefix + "_starved";
+
+
         String simNamePostfix = "";
 
         boolean doMPI = false; // Will be set to true if we are running is EnKF mode using MPI
@@ -100,11 +110,17 @@ public class RunSimFullFarmDigestiveRate {
 
         boolean decreasingCurrentFactor = true;
 
+        if (!useBjoroyaData)
+            decreasingCurrentFactor = false; // Turn this off in artificial scenario
+
         // -----------------------------------------------------------
         // Activation of modified o2 uptake model:
         if (!isControlSim) {
             IngestionAndO2Subgrid.setAddDigestiveO2Cons(true); // If true, activating digestive o2 consumption
-            IngestionAndO2Subgrid.o2consumptionMult = 0.7882 * 1.3; // 3*1.3;
+            if (useBjoroyaData)
+                IngestionAndO2Subgrid.o2consumptionMult = 0.7882 * 1.3; // 3*1.3;
+            else
+                IngestionAndO2Subgrid.o2consumptionMult = 0.95* 0.7882 * 1.3; // Larger fish, higher V, need to down-adjust more to get equal means
         }
         // -----------------------------------------------------------
 
@@ -155,16 +171,40 @@ public class RunSimFullFarmDigestiveRate {
         int[] feedStartEnd = null;
 
         // Location setup
-        int[] cageGrid = new int[] {4, 2};
-        int[][] cagePos = new int[][] {{0, 0}, {0, 1}, {1, 0}, {2, 0}, {2, 1}, {3, 0}}; // cage index 4 is "our" cage
-        double farmRotation = 42; // Current directions should be rotated by -1 times this angle
+        int[] cageGrid = null;
+        int[][] cagePos = null;
+        double farmRotation = 0;
+        double nFish, meanWeight, feedPerDay;
         double rad = 25;
         double depth = 25, totDepth = 25; // Cage size (m)
-        if (useBjoroyaData)
-            feedStartEnd = new int[] {27000, 63000};
-        else
-            feedStartEnd = new int[] {43200, 86400};
 
+        int storeIntervalFeed = 7200, storeIntervalInfo = 60;
+
+        if (useBjoroyaData) {
+            cageGrid = new int[]{4, 2};
+            cagePos = new int[][]{{0, 0}, {0, 1}, {1, 0}, {2, 0}, {2, 1}, {3, 0}}; // cage index 4 is "our" cage
+            farmRotation = 42; // Current directions should be rotated by -1 times this angle
+            feedStartEnd = new int[]{27000, 63000};
+
+            nFish = 169821; // Estimated number of individuals in experimental period (source: FishTalk data)
+            meanWeight = 2869.5; // Estimated mean weight in experimental period (source: FishTalk data)
+            feedPerDay = 2900.*1000; // Approximate feeding for the one cage over 10 hours based on FishTalk data
+        }
+        else { // Artificial scenario
+            cageGrid = new int[]{3, 3};
+            cagePos = new int[][]{{0, 0}, {0, 1}, {0, 2}, {1, 0}, {1, 1}, {1, 2},
+                    {2, 0}, {2, 1}, {2, 2}}; // cage index 4 is "our" cage (here, too)
+            feedStartEnd = new int[]{43200, 86400};
+
+            nFish = 200000; // Max number per cage
+            meanWeight = 4500; // Gives biomass of a little less than 20 kg/m3
+            feedPerDay = nFish*meanWeight*0.006; // 0.6 % of biomass per day
+            // REDUCED RESOLUTION FOR TESTING
+            //dxy = 4;
+            //dz = 4;
+            // REDUCED TIME RESOLUTION FOR 3D FIELDS:
+            storeIntervalFeed = 4*7200;
+        }
         // Sensor depths (all horizontal positions will be equipped with sensors at all depths:
         double[] sensorDepths = new double[] {5, 10, 15};
         // Angle positions of sensors at outer edge of each tank (0 degrees refers to north):
@@ -184,7 +224,6 @@ public class RunSimFullFarmDigestiveRate {
 
         // Cage settings:
         double dt = .5 * dxy; // Time step (s)
-        int storeIntervalFeed = 7200, storeIntervalInfo = 60;
         boolean storeO2Histograms = true;
         double depthDomain = 38;
 
@@ -200,7 +239,7 @@ public class RunSimFullFarmDigestiveRate {
         }
         // Environmental conditions:
         double currentSpeedInit = 2*0.04; // External current speed (m/s)
-        double T_w = 14; double avO2 = 9; // mg / l
+        double T_w = 14;
 
 
         // Oxygen diffusion constant. To be set dependent on current speed.
@@ -247,17 +286,11 @@ public class RunSimFullFarmDigestiveRate {
         }
 
         // Feeding periods (start/end in s):
-        // Fra Eskil (Bjørøya): måltidene varte fra ca. kl. 07:30-17:30, i gjennomsnitt.
-        int[][] feedingPeriods = new int[][] {{feedStartEnd[0], feedStartEnd[1]},
-                {86400+feedStartEnd[0], 86400+feedStartEnd[1]},
-                {2*86400+feedStartEnd[0], 2*86400+feedStartEnd[1]},
-                {3*86400+feedStartEnd[0], 3*86400+feedStartEnd[1]},
-                {4*86400+feedStartEnd[0], 4*86400+feedStartEnd[1]},
-                {5*86400+feedStartEnd[0], 5*86400+feedStartEnd[1]},
-                {6*86400+feedStartEnd[0], 6*86400+feedStartEnd[1]},
-                {7*86400+feedStartEnd[0], 7*86400+feedStartEnd[1]},
-                {8*86400+feedStartEnd[0], 8*86400+feedStartEnd[1]},
-                {9*86400+feedStartEnd[0], 9*86400+feedStartEnd[1]}};
+        int[][] feedingPeriods = new int[ndays][2];
+        for (int i=0; i<ndays; i++) {
+            feedingPeriods[i][0] = 86400*i + feedStartEnd[0];
+            feedingPeriods[i][1] = 86400*i + feedStartEnd[1];
+        }
         int nPeriods = feedingPeriods.length;
 
         Object sourceTerm = null;
@@ -326,7 +359,7 @@ public class RunSimFullFarmDigestiveRate {
         double[] ambientValueO2 = new double[cageDims[2]];
         double[] ambientValueO2_r = new double[cageDims[2]]; // Possibly perturbed ambient value of O2
         for (int i = 0; i < ambientValueO2.length; i++) {
-            ambientValueO2[i] = avO2;
+            ambientValueO2[i] = artifExtO2;
         }
 
         // If we are running in EnKF mode, let rank 0 initialize the EnKF class:
@@ -393,11 +426,8 @@ public class RunSimFullFarmDigestiveRate {
             }
 
             // Fish setup per cage (N, mean weight and std.dev weight):
-            double nFishBjoroya = 169821; // Estimated number of individuals in experimental period (source: FishTalk data)
-            double meanWeight = 2869.5; // Estimated mean weight in experimental period (source: FishTalk data)
             double[] wFish = new double[] {meanWeight, 0.2*meanWeight};
 
-            double nFish = nFishBjoroya;
 
             SimpleFish[] fish = new SimpleFish[cagePositions.size()];
             double totN = 0, totWeight = 0;
@@ -407,16 +437,21 @@ public class RunSimFullFarmDigestiveRate {
                 totN += nFish;
                 totWeight += nFish*wFish[0];
 
-                // Set initial V values
-                // For Bjørøya comparison:
-                fish[i].setAllV(new double[] {1.9702, 2.8394, 3.6058, 4.3228, 5.0730, 5.9551, 7.0810});
+                if (!simulateStarving) {
+                    // Set initial V values
+                    // For Bjørøya comparison:
+                    fish[i].setAllV(new double[]{1.9702, 2.8394, 3.6058, 4.3228, 5.0730, 5.9551, 7.0810});
+                }
             }
             System.out.println("Tot N: "+totN+" , Avg weight: "+(totWeight/totN));
             double[][][] fishTmp = new double[fish[0].getNGroups()][1][1];
 
             // Determine nominal feeding rate:
             double feedPeriodLength = feedingPeriods[0][1] - feedingPeriods[0][0];
-            double nominalFeedingRate = 2900.*1000/feedPeriodLength; // Approximate feeding over 10 hours based on FishTalk data
+            double nominalFeedingRate = feedPerDay/feedPeriodLength; // Approximate feeding over 10 hours based on FishTalk data
+            if (simulateStarving)
+                nominalFeedingRate = 1e-3;
+
 
             double feedingRateMult = 0; // Set each timestep
             System.out.println("Feeding rate = "+nominalFeedingRate);
@@ -496,8 +531,8 @@ public class RunSimFullFarmDigestiveRate {
             // Variables for current in artificial scenario:
             double currentDirection = 90;
             double currentSpeed = currentSpeedInit;
-            double beta_currentDir = 0.01;
-            double sigma_currentDir = 10;
+            double beta_currentDir = 0.001; // the value of beta is 1/tau where tau is the time to 37% correlation
+            double sigma_currentDir = 15;//10;
 
             double t = 0;
             int n_steps = (int) (t_end / dt);
@@ -750,7 +785,6 @@ public class RunSimFullFarmDigestiveRate {
                         fishfile = SaveNetCDF.initializeFile(fishfilePath, new int[]{fish[0].getNGroups(), 1, cageDims[2]}, 1, 1, unitString, ms);
                         SaveNetCDF.createProfileVariable(fishfile, "appetite", 0);
                         SaveNetCDF.createProfileVariable(fishfile, "ingested", 0);
-                        SaveNetCDF.createProfileVariable(fishfile, "V", 0);
                         SaveNetCDF.createScalarVariables(fishfile, "rho", "feedingRate", "o2ConsumptionRate",
                                 "min_O2", "mean_O2",
                                 "meanFeedDepth", "d_meanFeedDepth", "totIngRate", "totIngested", "totFeed",
@@ -761,6 +795,7 @@ public class RunSimFullFarmDigestiveRate {
                         SaveNetCDF.createProfileVariable(fishfile, "ext_currentV", 2);
                         SaveNetCDF.createScalarVariables(fishfile, ms.names);
                         for (int ii=0; ii<cagePositions.size(); ii++) {
+                            SaveNetCDF.createScalarVariable(fishfile, "Cage_"+(ii+1)+"_V");
                             SaveNetCDF.createScalarVariable(fishfile, "Cage_"+(ii+1)+"_min");
                             SaveNetCDF.createScalarVariable(fishfile, "Cage_"+(ii+1)+"_perc5");
                             SaveNetCDF.createScalarVariable(fishfile, "Cage_"+(ii+1)+"_perc10");
@@ -797,10 +832,8 @@ public class RunSimFullFarmDigestiveRate {
                     while ((cage<fish.length-1) && (fish[cage].getTotalN() == 0))
                         cage++;
 
-                    for (int j = 0; j < fishTmp.length; j++)
-                        groupArray[j] = fish[cage].getV(j);
-                    SaveNetCDF.saveProfileVariable(fishfile, t, "V", 0, groupArray, true);
-                    SaveNetCDF.saveScalarVariable(fishfile, t, "waste", outFlow, false);
+
+                    SaveNetCDF.saveScalarVariable(fishfile, t, "waste", outFlow, true);
                     SaveNetCDF.saveScalarVariable(fishfile, t, "waste_net", outFlow_net, false);
                     
                     double totI = 0, totIngRate = 0;
@@ -885,7 +918,9 @@ public class RunSimFullFarmDigestiveRate {
                                 st.stats[4], false);
                         SaveNetCDF.saveScalarVariable(fishfile, t, "Cage_"+(ii+1)+"_fracHypoxia",
                                 st.stats[5], false);
-
+                        // Save average gut content for cage:
+                        SaveNetCDF.saveScalarVariable(fishfile, t, "Cage_"+(ii+1)+"_V",
+                                fish[ii].getAverageV(), false);
                     }
 
 

@@ -12,8 +12,7 @@ import fishmodel.enkf.Util;
 import fishmodel.hydraulics.CurrentMagicFields;
 import fishmodel.hydraulics.SimpleTankHydraulics;
 import fishmodel.pellets.*;
-import fishmodel.sim.InputDataNMBUStudy;
-import fishmodel.sim.InventoryNMBUStudy;
+import fishmodel.sim.InputDataLoenngrunnen;
 import org.apache.commons.math3.analysis.interpolation.LinearInterpolator;
 import org.apache.commons.math3.analysis.polynomials.PolynomialSplineFunction;
 import save.SaveNetCDF;
@@ -36,7 +35,10 @@ public class RunSimLoenngrunnen {
     public static LinearInterpolator interpol = new LinearInterpolator();
 
     /**
-     * Setup for NMBU oxygen study
+     * Setup for Lønngrunnen oxygen study i PROHAV
+     *
+     * Posisjon Lønngrunnen: 63°56.250′ 9°46.767′ (Fiskeridirektoratets kartverktøy
+     * (63.9375 / 9.7795)
      */
     public static void main(String[] args) {
 
@@ -50,14 +52,11 @@ public class RunSimLoenngrunnen {
         double dxy = 4, dz = 4; // Model resolution (m)
         String resStr = String.valueOf(dxy);
 
-        // Lokalitet som skal kjøres:
-        int lokNo = 1;
-        String[] lokPrefixes = new String[] {"L1", "L2", "L3"};
-        String lokalitet = lokPrefixes[lokNo-1];
-
+        boolean useFieldInputs = true;
+        boolean useCurrentMagic = false; // Use spatially variable current flow field
         // Save files:
         String saveDir = "./output_LOENN/";
-        String simNamePrefix = "loenngr_"+resStr+"m_"+lokalitet; //"ff_3m_curr0.7_";
+        String simNamePrefix = "loenngr_"+(useCurrentMagic ? "" : "nomag_")+resStr+"m"; //"ff_3m_curr0.7_";
         String simNamePostfix = "";
 
         boolean doMPI = false; // Will be set to true if we are running is EnKF mode using MPI
@@ -89,24 +88,22 @@ public class RunSimLoenngrunnen {
         double lastMeanFeedDepth = -1;
         boolean maskO2WhenSaving = false;
 
-        boolean useConstantAmbientSaturation = false;
-        double ambientSaturationVal = 1;
 
         boolean varyAmbient = false; // Reduction in ambient values towards the rest of the farm
 
         boolean useVerticalDist = true;
 
 
-        boolean useCurrentMagic = false; // Use spatially variable current flow field
         CurrentMagicFields cmf = null;
         if (useCurrentMagic) {
-            cmf = new CurrentMagicFields("C:/Users/alver/OneDrive - NTNU/prosjekt/PROHAV/matlab/currents_heuristic_10deg.nc");
+            cmf = new CurrentMagicFields("C:/Users/alver/OneDrive - NTNU/prosjekt/PROHAV/matlab/fluentOptim/lti_currents3.nc");
+            //cmf = new CurrentMagicFields("C:/Users/alver/OneDrive - NTNU/prosjekt/PROHAV/matlab/currents_heuristic_10deg.nc");
         }
 
         boolean includeHypoxiaAvoidance = true;
         int checkAvoidanceInterval = 30, checkAvoidanceCount = 0;
 
-        int year = 2024, month = Calendar.APRIL, day = 10;  // First day is: MAY 11
+        int year = 2025, month = Calendar.JUNE, day = 23;
         int nSim = 1; // Number of days to simulate (separate sims)
 
         // If we are not running in MPI mode, we check the first argument whether it indicates a number of
@@ -135,25 +132,26 @@ public class RunSimLoenngrunnen {
         // Domain settings and farm layout:
         int [] cageGrid=null;
         int[][] cagePos=null;
-        double frameSize = 90; // Rammefortøyning
+        double frameSize = 110; // Rammefortøyning
         double outerPadding = 75; // Ekstra rom utenfor rammefortøyningene
-        double farmRotation = 0; // Current directions should be rotated by -1 times this angle
         double[] spaghettiRad = null, spaghettiDepth = null; // Cage definitions
         int[] feedStartEnd = null;
-        switch (lokNo) {
-            case 1: // Lønnngrunnen
-                cageGrid = new int[] {6, 2};
-                cagePos = new int[][] {{0, 1}, {0, 0}, {1, 1}, {1, 0}, {2, 1}, {2, 0},
-                        {3, 1}, {3, 0}, {4, 1}, {4, 0}, {5, 0},};
-                farmRotation = -80; // Current directions should be rotated by -1 times this angle
-                // Location is nearly north-south oriented, so north in the model should be to the
-                // right and slightly up
-                spaghettiRad = new double[] {25.5, 17.8}; // Radius ved overflaten og ved bunntau
-                spaghettiDepth = new double[] {20, 38}; // Dybde bunntau og bunn not
-                feedStartEnd = new int[] {7*3600, 19*3600}; // Fra Bremnes: Vi starter opp med ca. 3 måltider mellom 07:00 og 19:00
-                break;
 
-        }
+
+        // Lønnngrunnen
+        cageGrid = new int[] {6, 2};
+        /* CORRECT */
+        cagePos = new int[][] {{0, 1}, {0, 0}, {1, 1}, {1, 0}, {2, 1}, {2, 0},
+                        {3, 1}, {3, 0}, {4, 1}, {4, 0}, {5, 0},};
+        /* 12 cages: cagePos = new int[][] {{0, 1}, {0, 0}, {1, 1}, {1, 0}, {2, 1}, {2, 0},
+                {3, 1}, {3, 0}, {4, 1}, {4, 0}, {5, 1}, {5, 0},};*/
+        double farmRotation = -84.35; // Current directions should be rotated by -1 times this angle
+        // Location is nearly north-south oriented, so north in the model should be to the
+        // right and slightly up
+        spaghettiRad = new double[] {30.0, 30.0};//{25.5, 17.8}; // Radius ved overflaten og ved bunntau
+        spaghettiDepth = new double[] {20, 38}; // Dybde bunntau og bunn not
+        feedStartEnd = new int[] {7*3600, 19*3600}; // Fra Bremnes: Vi starter opp med ca. 3 måltider mellom 07:00 og 19:00
+
 
 
         // Sensor depths (all horizontal positions will be equipped with sensors at all depths:
@@ -166,18 +164,9 @@ public class RunSimLoenngrunnen {
         System.out.println("Domain dims: "+domainDims[0]+" x "+domainDims[1]);
         ArrayList<double[]> cagePositions = new ArrayList<>();
         for (int i=0; i<cagePos.length; i++) {
-            if (lokNo != 2)
-                cagePositions.add(new double[] {outerPadding + frameSize*((double)(cagePos[i][0]) +0.5),
-                    outerPadding + frameSize*(((double)cagePos[i][1]) +0.5)});
-            else {
-                // Ta høyde for kortere avstand mellom radene på Prestholmane:
-                double ypos = 0;
-                if (cagePos[i][1] == 0) // Nederste rad
-                    ypos = outerPadding + frameSize*(0.5 + 0.125);
-                else
-                    ypos = outerPadding + frameSize*(2.5 - 0.125);
-                cagePositions.add(new double[] {outerPadding + frameSize*((double)(cagePos[i][0]) +0.5), ypos});
-            }
+            cagePositions.add(new double[] {outerPadding + frameSize*((double)(cagePos[i][0]) +0.5),
+                outerPadding + frameSize*(((double)cagePos[i][1]) +0.5)});
+
             double[] pos = cagePositions.get(cagePositions.size()-1);
             System.out.println("Cage: "+pos[0]+" x "+pos[1]);
 
@@ -187,7 +176,7 @@ public class RunSimLoenngrunnen {
         // Cage settings:
         double rad = spaghettiRad[0];
         double dt = .5 * dxy; // Time step (s)
-        int storeIntervalFeed = 7200, storeIntervalInfo = 60;
+        int storeIntervalFeed = 600/*7200*/, storeIntervalInfo = 60;
         boolean storeO2Histograms = true;
         double depthDomain = 38;
 
@@ -371,9 +360,9 @@ public class RunSimLoenngrunnen {
             hydro = SimpleTankHydraulics.getProfileHydraulicField(cageDims, currentProfile);
 
 
-            AdvectPellets ap = new AdvectPellets();
+            AdvectPelletsVarCurr ap = new AdvectPelletsVarCurr();
 
-            AdvectPellets apOx = new AdvectPellets();
+            AdvectPelletsVarCurr apOx = new AdvectPelletsVarCurr();
             //AdvectPelletsVarCurr apOx_vc = new AdvectPelletsVarCurr();
             if (varyAmbient) {
                 apOx.setVaryAmbient(true, affinityProfile);
@@ -386,22 +375,25 @@ public class RunSimLoenngrunnen {
             System.out.println("Unit string: "+unitString);
 
             // Initialize environmental input data:
-            String inDataFileName = lokalitet+"_data.nc";
-            String inDataFile = "C:/Users/alver/OneDrive - NTNU/prosjekt/PROHAV/NMBU-studie/"+inDataFileName;
-            if (!(new File(inDataFile)).exists())
-                inDataFile = inDataFileName;
-            InputDataNMBUStudy inData = new InputDataNMBUStudy(inDataFile);
-            inData.setStartTime(startTime);
+            String inDataFileName = "loenngrunnen_data.nc";
+            String inDataFile = "C:/Users/alver/OneDrive - NTNU/prosjekt/PROHAV/feltstudie/"+inDataFileName;
+            InputDataLoenngrunnen inData = null;
+            if (useFieldInputs) {
+                if (!(new File(inDataFile)).exists())
+                    inDataFile = inDataFileName;
+                inData = new InputDataLoenngrunnen(inDataFile);
+                inData.setStartTime(startTime);
+            }
 
-            // Read weight and count data for the simulation time:
-            String invDataFileName = lokalitet+"_inventory.nc";
-            String invDataFile = "C:/Users/alver/OneDrive - NTNU/prosjekt/PROHAV/NMBU-studie/"+invDataFileName;
-            if (!(new File(invDataFile)).exists())
-                invDataFile = invDataFileName;
-            InventoryNMBUStudy inv = new InventoryNMBUStudy(invDataFile, startTime);
-            double[] weight = inv.getWeight(); // Average weight per cage
-            double[] count = inv.getCount(); // Estimated count per cage
-            double[] feed = inv.getFeed(); // Estimated count per cage
+            // Set up weight and count
+            double[] weight = new double[cagePositions.size()];
+            double[] count = new double[cagePositions.size()];
+            double[] feed = new double[cagePositions.size()];
+            for (int i=0; i<cagePositions.size(); i++) {
+                weight[i] = 4000;
+                count[i] = 150000;
+                feed[i] = 2000;
+            }
             SimpleFish[] fish = new SimpleFish[cagePositions.size()];
             double totN = 0, totWeight = 0;
             for (int i=0; i<fish.length; i++) {
@@ -432,14 +424,19 @@ public class RunSimLoenngrunnen {
             double[][][] o2 = new double[cageDims[0]][cageDims[1]][cageDims[2]];
             double[][][] ingDist = new double[cageDims[0]][cageDims[1]][cageDims[2]];
             double[][][] o2consDist = new double[cageDims[0]][cageDims[1]][cageDims[2]];
-            System.out.println("Initial ambient: "+inData.getO2Ambient5());
-            AdvectPellets.initField(o2, inData.getO2Ambient5());//avO2);
+            AdvectPellets.initField(o2, avO2);
             AdvectPellets.initField(ingDist, 0);
             double outFlow = 0., outFlow_net = 0.;
 
             // Initialize O2 field based on first ambient values:
-            double[] ambVal = new double[] {inData.getO2Ambient5(), inData.getO2Ambient15(), inData.getO2Ambient30()};
-            interpolateVertical(ambientValueO2, new double[] {5, 15, 30}, ambVal, cageDims[2], dz);
+            double[] ambVal;
+            if (useFieldInputs) {
+                ambVal = new double[]{inData.getO2Ambient5(), inData.getO2Ambient10(), inData.getO2Ambient15()};
+            }
+            else {
+                ambVal = new double[]{avO2, avO2, avO2};
+            }
+            interpolateVertical(ambientValueO2, new double[] {5, 10, 15}, ambVal, cageDims[2], dz);
             for (int i=0; i<cageDims[0]; i++)
                 for (int j=0; j<cageDims[1]; j++)
                     for (int k=0; k<cageDims[2]; k++) {
@@ -492,100 +489,88 @@ public class RunSimLoenngrunnen {
                 //System.out.println("t = "+t);
                 double tMin = t / 60;
 
-                if (inData.advance(t) || (i==0)) {
-                    //System.out.println("Updating environment: t = "+t);
+                if (useFieldInputs) {
+                    if (inData.advance(t) || (i == 0)) {
+                        //System.out.println("Updating environment: t = "+t);
 
-                    double[] obsCurrentDepths = inData.getCurrentDepths();
-                    double[] tempVal = inData.getTemperatureProfile();
-                    interpolateVertical(ambientTemp, obsCurrentDepths, tempVal, cageDims[2], dz);
+                        double[] obsCurrentDepths = inData.getCurrentDepths();
+                        double[] tempVal = new double[]{ inData.getTemperature5(), inData.getTemperature10(), inData.getTemperature15()};
+                        interpolateVertical(ambientTemp, new double[]{5, 10, 15}, tempVal, cageDims[2], dz);
 
-                    /*for (int j = 0; j < obsCurrentDepths.length; j++) {
-                        System.out.println("Temp depth: "+obsCurrentDepths[j]+" T="+tempVal[j]);
-                    }
-                    for (int j = 0; j < ambientTemp.length; j++) {
-                        System.out.println("i="+j+", interpolated T="+ambientTemp[j]);
-                    }*/
+                        ambVal = new double[]{inData.getO2Ambient5(), inData.getO2Ambient10(), inData.getO2Ambient15()};
+                        interpolateVertical(ambientValueO2, new double[]{5, 10, 15}, ambVal, cageDims[2], dz);
 
-                    ambVal = new double[]{inData.getO2Ambient5(), inData.getO2Ambient15(), inData.getO2Ambient30()};
-                    interpolateVertical(ambientValueO2, new double[]{5, 10, 15}, ambVal, cageDims[2], dz);
-                    /*double[] ambVal = new double[]{inData.getO2Ambient5()};//, inData.getO2Ambient10(), inData.getO2Ambient15()};
-                    for (int j=0; j<ambientValueO2.length; j++)
-                        ambientValueO2[j] = ambVal[0];*/
+                        double[] obsCurrentProfile = inData.getExtCurrentSpeedProfile();
+                        double[] obsCurrentDirProfile = inData.getExtCurrentDirProfile();
+                        double[] obsCurrentComp1 = new double[obsCurrentProfile.length],
+                                obsCurrentComp2 = new double[obsCurrentProfile.length];
 
-                    //ambVal[0] = 9; ambVal[1] = 9; ambVal[2] = 9;
-                    //double[] ambVal = {2., 10., 5.};
-                    //interpolateVertical(ambientValueO2, new double[]{5, 10, 15}, ambVal, cageDims[2], dz);
+                        // TODO: Since the model domain is rotated we need to adjust the direction to compensate.
+                        for (int j = 0; j < obsCurrentComp1.length; j++) {
+                            obsCurrentComp1[j] = currentReductionFactor *
+                                    obsCurrentProfile[j] * Math.sin((obsCurrentDirProfile[j] - farmRotation) * Math.PI / 180.);
+                            obsCurrentComp2[j] = currentReductionFactor *
+                                    obsCurrentProfile[j] * Math.cos((obsCurrentDirProfile[j] - farmRotation) * Math.PI / 180.);
+                        }
+                        System.out.println("u="+obsCurrentComp1[0]+" / v="+obsCurrentComp2[0]+" / origdir="+obsCurrentDirProfile[0]+", farmrotation="+farmRotation);
+                        //for (int j = 0; j < obsCurrentComp1.length; j++) {
+                        //    System.out.println("i="+j+", u="+obsCurrentComp1[j]+" / v="+obsCurrentComp2[j]);
+                        //}
 
-                    if (useConstantAmbientSaturation) {
-                        // Set ambient O2 value based on a fraction of maximum saturation
-                        // as a function of temperature. We use the surface temperature
-                        // to choose the saturation level for all layers, because maximum
-                        // saturation increases with increasing pressure, so it is only
-                        // limiting at the surface.
-                        for (int j=0; j<ambientValueO2.length; j++) {
-                            ambientValueO2[j] = ambientSaturationVal*
-                                    OxygenSolubility.getOxygenSolubility(ambientTemp[0]);
+                        double[] interpProfile1 = new double[cageDims[2]],
+                                interpProfile2 = new double[cageDims[2]];
+                        interpolateVertical(interpProfile1, obsCurrentDepths, obsCurrentComp1, cageDims[2], dz);
+                        interpolateVertical(interpProfile2, obsCurrentDepths, obsCurrentComp2, cageDims[2], dz);
+
+                        //for (int j = 0; j < interpProfile1.length; j++) {
+                        //    System.out.println("Interpolated: i="+j+", u="+interpProfile1[j]+" / v="+interpProfile2[j]);
+                        //}
+
+                        for (int j = 0; j < interpProfile1.length; j++) {
+                            //if (j==0)
+                            //    System.out.println("Interpolated current speed "+(j)+": "+interpProfile1[j]+" / "+interpProfile2[j]);
+                            currentProfile[j][0] = interpProfile1[j];
+                            currentProfile[j][1] = interpProfile2[j];
+                            currentProfile[j][2] = 0.;
+                        }
+
+                        if (!useCurrentMagic) {
+                            // Update current field using the new profile:
+                            SimpleTankHydraulics.getProfileHydraulicField(hydro, cageDims, currentProfile);
+                        } else {
+                            double[] lDirections = new double[cageDims[2]],
+                                    lSpeeds = new double[cageDims[2]];
+                            for (int j = 0; j < cageDims[2]; j++) {
+                                lSpeeds[j] = Math.sqrt(interpProfile1[j] * interpProfile1[j] + interpProfile2[j] * interpProfile2[j]);
+                                lDirections[j] = Math.atan2(interpProfile1[j], interpProfile2[j]) * 180. / Math.PI;
+
+                            }
+                            cmf.setCurrentField(hydro, lSpeeds, lDirections);
                         }
                     }
-
-                    double[] obsCurrentProfile = inData.getExtCurrentSpeedProfile();
-                    double[] obsCurrentDirProfile = inData.getExtCurrentDirProfile();
-                    double[] obsCurrentComp1 = new double[obsCurrentProfile.length],
-                            obsCurrentComp2 = new double[obsCurrentProfile.length];
-
-
-                    /*System.out.println("orig dir="+(obsCurrentDirProfile[0])+" / orig spd="+
-                            obsCurrentProfile[0]);*/
-
-                    // TODO: Since the model domain is rotated we need to adjust the direction to compensate.
-                    for (int j = 0; j < obsCurrentComp1.length; j++) {
-                        obsCurrentComp1[j] = currentReductionFactor*
-                                obsCurrentProfile[j]*Math.sin((obsCurrentDirProfile[j]-farmRotation)*Math.PI/180.);
-                        obsCurrentComp2[j] = currentReductionFactor*
-                                obsCurrentProfile[j]*Math.cos((obsCurrentDirProfile[j]-farmRotation)*Math.PI/180.);
-                    }
-                    //System.out.println("u="+obsCurrentComp1[0]+" / v="+obsCurrentComp2[0]+" / origdir="+obsCurrentDirProfile[0]+", farmrotation="+farmRotation);
-                    /*for (int j = 0; j < obsCurrentComp1.length; j++) {
-                        System.out.println("i="+j+", u="+obsCurrentComp1[j]+" / v="+obsCurrentComp2[j]);
-                    }*/
-
-                    double[] interpProfile1 = new double[cageDims[2]],
-                            interpProfile2 = new double[cageDims[2]];
-                    interpolateVertical(interpProfile1, obsCurrentDepths, obsCurrentComp1, cageDims[2], dz);
-                    interpolateVertical(interpProfile2, obsCurrentDepths, obsCurrentComp2, cageDims[2], dz);
-
-                    /*for (int j = 0; j < interpProfile1.length; j++) {
-                        System.out.println("Interpolated: i="+j+", u="+interpProfile1[j]+" / v="+interpProfile2[j]);
-                    }*/
-
-                    for (int j = 0; j < interpProfile1.length; j++) {
-                        //if (j==0)
-                        //    System.out.println("Interpolated current speed "+(j)+": "+interpProfile1[j]+" / "+interpProfile2[j]);
-                        currentProfile[j][0] = interpProfile1[j];
-                        currentProfile[j][1] = interpProfile2[j];
-                        currentProfile[j][2] = 0.;
-                    }
-
+                }
+                else { // Artificial setting, no field data
+                    // Update variable current speed offset:
                     if (!useCurrentMagic) {
-                        // Update current field using the new profile:
-                        SimpleTankHydraulics.getProfileHydraulicField(hydro, cageDims, currentProfile);
-                    }
-                    else {
+                        // Juse use the global offset:
+                        currentOffset[0] = 0.1;//currentReductionFactor*currentSpeed*Math.cos(currentDirection*Math.PI/180.);
+                        currentOffset[1] = 0.0;//currentReductionFactor*currentSpeed*Math.sin(currentDirection*Math.PI/180.);
+                    } else {
+                        currentOffset[0] = 0;
+                        currentOffset[1] = 0;
+                        //double ucomp = -0.5, vcomp = -0.035;
+                        double angle = 90 + 2. * (Math.random() - 0.5);
+                        double speed = 0.1;//Math.sqrt(ucomp*ucomp+vcomp*vcomp); //0.1;
                         double[] lDirections = new double[cageDims[2]],
                                 lSpeeds = new double[cageDims[2]];
                         for (int j = 0; j < cageDims[2]; j++) {
-                            lSpeeds[j] = Math.sqrt(interpProfile1[j]*interpProfile1[j] + interpProfile2[j]*interpProfile2[j]);
-                            lDirections[j] = Math.atan2(interpProfile1[j], interpProfile2[j])*180./Math.PI;
-
+                            lSpeeds[j] = speed;
+                            lDirections[j] = angle;
+                            //System.out.println("ANGLE: "+(90-Math.atan2(vcomp, ucomp)*180./Math.PI));
                         }
                         cmf.setCurrentField(hydro, lSpeeds, lDirections);
                     }
                 }
-
-
-                // Update variable current speed offset:
-                currentOffset[0] = 0.;//currentReductionFactor*currentSpeed*Math.cos(currentDirection*Math.PI/180.);
-                currentOffset[1] = 0.;//currentReductionFactor*currentSpeed*Math.sin(currentDirection*Math.PI/180.);
 
                 diffKappaO2 = Math.min(0.5, 10*Math.pow(currentReductionFactor*0.06,2)); // Math.min(0.5, 10*Math.pow(currentReductionFactor*0.04,2));
                 diffKappaO2Z = 5.0*0.1*diffKappaO2;

@@ -32,7 +32,7 @@ public class InputDataNMBUStudy {
     public InputDataNMBUStudy(String filepath) {
 
         try {
-            System.out.println("Opening input file: "+filepath);
+            System.out.println("Opening input file: " + filepath);
             NetcdfFile ncfile = NetcdfFile.open(filepath);
             Variable time = ncfile.findVariable("time");
             Variable spd = ncfile.findVariable("extCurrentSpeed");
@@ -51,14 +51,21 @@ public class InputDataNMBUStudy {
             ArrayDouble.D1 tdata = (ArrayDouble.D1) time.read(new int[]{0}, shape);
             ArrayDouble.D2 csdata = (ArrayDouble.D2) spd.read(new int[]{0, 0}, currentShape);
             ArrayDouble.D2 cddata = (ArrayDouble.D2) direction.read(new int[]{0, 0}, currentShape);
-            ArrayDouble.D2 tempdata = (ArrayDouble.D2) temp.read(new int[]{0, 0}, currentShape);
+            ArrayDouble.D2 tempdata;
+            boolean tempHasCurrShape = true;
+            try {
+                tempdata = (ArrayDouble.D2) temp.read(new int[]{0, 0}, currentShape);
+            } catch (InvalidRangeException ex) {
+                tempdata = (ArrayDouble.D2) temp.read(new int[]{0, 0}, o2Shape);
+                tempHasCurrShape = false;
+            }
             ArrayDouble.D2 o2data = (ArrayDouble.D2) o2.read(new int[]{0, 0}, o2Shape);
 
             // Read depth layers for current profiles:
             Variable zc = ncfile.findVariable("zc");
             ArrayDouble.D1 zcAD = (ArrayDouble.D1) zc.read(new int[]{0}, zc.getShape());
             currentDepths = new double[zc.getShape(0)];
-            for (int i=0; i<currentDepths.length; i++) {
+            for (int i = 0; i < currentDepths.length; i++) {
                 currentDepths[i] = zcAD.get(i);
             }
 
@@ -66,7 +73,7 @@ public class InputDataNMBUStudy {
             Variable zc_o2 = ncfile.findVariable("zc_o2");
             ArrayDouble.D1 zc_o2_AD = (ArrayDouble.D1) zc_o2.read(new int[]{0}, zc_o2.getShape());
             o2depths = new double[zc_o2.getShape(0)];
-            for (int i=0; i<o2depths.length; i++) {
+            for (int i = 0; i < o2depths.length; i++) {
                 o2depths[i] = zc_o2_AD.get(i);
             }
 
@@ -74,18 +81,26 @@ public class InputDataNMBUStudy {
             ltime = new Long[shape[0]];
             currentSpeeds = new double[currentShape[0]][currentShape[1]];
             currentDirs = new double[currentShape[0]][currentShape[1]];
-            temps = new double[currentShape[0]][currentShape[1]];
+            temps = new double[currentShape[0]][(tempHasCurrShape ? currentShape[1] : o2Shape[1])];
             o2vals = new double[o2Shape[0]][o2Shape[1]];
-            for (int i=0; i<times.length; i++) {
-                ltime[i] = (1000*Math.round(tdata.get(i) * 86400 - 7200)); // Subtracting two hours since Java assumes GMT, but it is given in Norwegian summer time.
+            for (int i = 0; i < times.length; i++) {
+                ltime[i] = (1000 * Math.round(tdata.get(i) * 86400 - 7200)); // Subtracting two hours since Java assumes GMT, but it is given in Norwegian summer time.
                 times[i] = new Date(ltime[i]);
 
             }
-            for (int i=0; i<times.length; i++) {
-                for (int j=0; j<currentShape[1]; j++) {
-                    currentSpeeds[i][j] = csdata.get(i,j);
-                    currentDirs[i][j] = cddata.get(i,j);
-                    temps[i][j] = tempdata.get(i,j);
+            for (int i = 0; i < times.length; i++) {
+                for (int j = 0; j < currentShape[1]; j++) {
+                    currentSpeeds[i][j] = csdata.get(i, j);
+                    currentDirs[i][j] = cddata.get(i, j);
+                    if (tempHasCurrShape)
+                        temps[i][j] = tempdata.get(i, j);
+                }
+            }
+            if (!tempHasCurrShape) {
+                for (int i = 0; i < times.length; i++) {
+                    for (int j = 0; j < o2Shape[1]; j++) {
+                        temps[i][j] = tempdata.get(i, j);
+                    }
                 }
             }
 
@@ -139,14 +154,15 @@ public class InputDataNMBUStudy {
         if (currentSpeedMod == null) {
             currentSpeedMod = new double[currentSpeeds[0].length];
             currentDirMod = new double[currentSpeeds[0].length];
-            tempMod = new double[currentSpeeds[0].length];
+            tempMod = new double[temps[0].length];
             o2Mod = new double[o2depths.length];
         }
         for (int i = 0; i< currentSpeeds[0].length; i++) {
             currentSpeedMod[i] = currentSpeeds[piv][i];
             currentDirMod[i] = currentDirs[piv][i];
             //System.out.println("i="+i+", speed="+currentSpeedMod[i]+", dir="+currentDirMod[i]);
-            tempMod[i] = temps[piv][i];
+            if (i < tempMod.length)
+                tempMod[i] = temps[piv][i];
         }
         for (int i=0; i<o2vals[0].length; i++) {
             o2Mod[i] = o2vals[piv][i];

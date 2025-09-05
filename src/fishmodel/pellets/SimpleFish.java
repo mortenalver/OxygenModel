@@ -80,6 +80,18 @@ public class SimpleFish {
         }
     }
 
+    /**
+     * Calculate the average V (weighted by N values) for the entire fish group
+     * @return the average V
+     */
+    public double getAverageV() {
+        double totN = getTotalN();
+        double sumV = 0;
+        for (int i=0; i<V.length; i++)
+            sumV += N[i]*V[i];
+        return sumV/totN;
+    }
+
     public double getIngested(int group) {
         return ingested[group];
     }

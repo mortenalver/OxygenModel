@@ -52,7 +52,7 @@ public class RunSimulationNMBU {
 
 
         // Lokalitet som skal kjøres:
-        int lokNo = 3;
+        int lokNo = 2;
         String[] lokPrefixes = new String[] {"L1", "L2", "L3"};
         String lokalitet = lokPrefixes[lokNo-1];
 
@@ -107,8 +107,8 @@ public class RunSimulationNMBU {
         boolean includeHypoxiaAvoidance = true;
         int checkAvoidanceInterval = 30, checkAvoidanceCount = 0;
 
-        int year = 2024, month = Calendar.SEPTEMBER, day = 13;  // First day is: MAY 11
-        int nSim = 31; // Number of days to simulate (separate sims)
+        int year = 2024, month = Calendar.OCTOBER, day = 5;  // First day is: MAY 11
+        int nSim = 1; // Number of days to simulate (separate sims)
 
         // If we are not running in MPI mode, we check the first argument whether it indicates a number of
         // days to add to the start date (if we are running in MPI mode the arguments actually contain
