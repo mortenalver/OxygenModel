@@ -597,7 +597,7 @@ public class FullFarmSimulations {
                         hydro, currentOffset_r, feedingRate, 0, ambientValueO2_r);
 
                 double[] res = IngestionAndO2Tempprofile.calculateIngestion(dt, fc, o2, affinity, o2Affinity, o2AffSum,
-                        availableCellsForO2Uptake, ingDist, o2consDist, dxy, dz, mask, pelletWeight, ambientTemp, fish, 1.0);
+                        availableCellsForO2Uptake, ingDist, o2consDist, dxy, dz, mask, pelletWeight, ambientTemp, fish, 1.0, false);
                 double totalIntake = res[0], rho = res[1], o2ConsumptionRate = res[2];
 
                 t = t + dt;

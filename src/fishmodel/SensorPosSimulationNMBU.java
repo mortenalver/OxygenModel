@@ -12,7 +12,8 @@ import fishmodel.enkf.Util;
 import fishmodel.hydraulics.CurrentMagicFields;
 import fishmodel.hydraulics.SimpleTankHydraulics;
 import fishmodel.pellets.*;
-import fishmodel.sim.InputDataNetcdf;
+import fishmodel.sim.InputDataNMBUStudy;
+import fishmodel.sim.InventoryNMBUStudy;
 import org.apache.commons.math3.analysis.interpolation.LinearInterpolator;
 import org.apache.commons.math3.analysis.polynomials.PolynomialSplineFunction;
 import save.SaveNetCDF;
@@ -20,7 +21,6 @@ import ucar.nc2.NetcdfFileWriteable;
 
 import java.io.File;
 import java.io.IOException;
-import java.text.DateFormat;
 import java.text.NumberFormat;
 import java.text.SimpleDateFormat;
 import java.util.*;
@@ -29,14 +29,14 @@ import java.util.*;
  *
  * @author malv
  */
-public class FullFarmSimulation2 {
+public class SensorPosSimulationNMBU {
 
     public static final double HYPOXIA_THRESHOLD = 6;
 
     public static LinearInterpolator interpol = new LinearInterpolator();
 
     /**
-     * Setup for Bjørøya
+     * Setup for NMBU oxygen study
      */
     public static void main(String[] args) {
 
@@ -46,9 +46,18 @@ public class FullFarmSimulation2 {
         // Initialize random number generator:
         Random rnd = new Random();
 
+        // Modelloppløsning:
+        double dxy = 2.5, dz = 2.5; // Model resolution (m)
+        String resStr = String.valueOf(dxy);
+
+        // Lokalitet som skal kjøres:
+        int lokNo = 3;
+        String[] lokPrefixes = new String[] {"L1", "L2", "L3"};
+        String lokalitet = lokPrefixes[lokNo-1];
+
         // Save files:
-        String saveDir = "./";
-        String simNamePrefix = "testlong"; //"ff_3m_curr0.7_";
+        String saveDir = "./output_NMBU/";
+        String simNamePrefix = "sensortest_"+resStr+"m_"+lokalitet; //"ff_3m_curr0.7_";
         String simNamePostfix = "";
 
         boolean doMPI = false; // Will be set to true if we are running is EnKF mode using MPI
@@ -80,11 +89,14 @@ public class FullFarmSimulation2 {
         double lastMeanFeedDepth = -1;
         boolean maskO2WhenSaving = false;
 
+        boolean useConstantAmbientSaturation = false;
+        double ambientSaturationVal = 1;
+
         boolean varyAmbient = false; // Reduction in ambient values towards the rest of the farm
+        final double constantAmbVal = 10;
 
         boolean useVerticalDist = true;
 
-        boolean decreasingCurrentFactor = false;
 
         boolean useCurrentMagic = false; // Use spatially variable current flow field
         CurrentMagicFields cmf = null;
@@ -95,14 +107,20 @@ public class FullFarmSimulation2 {
         boolean includeHypoxiaAvoidance = true;
         int checkAvoidanceInterval = 30, checkAvoidanceCount = 0;
 
-        int daysToAdd = 0;
+        int year = 2024, month = Calendar.OCTOBER, day = 19;  // First day is: MAY 11
+        int nSim = 5; // Number of days to simulate (separate sims)
+
         // If we are not running in MPI mode, we check the first argument whether it indicates a number of
         // days to add to the start date (if we are running in MPI mode the arguments actually contain
         // rank numbers and number of ranks, so can't be used to indicate days to add):
         if (!doMPI) {
-            if (args.length >= 1) {
+            if (args.length >= 3) {
                 try {
-                    daysToAdd = Integer.parseInt(args[0]);
+                    year = Integer.parseInt(args[0]);
+                    month = Integer.parseInt(args[1])-1; // Month is zero-based, so subtract 1
+                    day = Integer.parseInt(args[2]); // ... while day isn't
+
+                    nSim = 1; // If start date is specified, simulate one day only
                 } catch (NumberFormatException e) {
                     throw new RuntimeException(e);
                 }
@@ -110,37 +128,79 @@ public class FullFarmSimulation2 {
         }
 
         // Simulation start time:
-        int initYear = 2022, initMonth = Calendar.JUNE, initDate = 27+daysToAdd, initHour = 0, initMin = 0, initSec = 0;
-        double t_end = 3600;//1*24*3600; // Duration of simulation
-        int nSim = 4; // Number of days to simulate (separate sims)
-        int startAt = 0; // Set to >0 to skip one of more simulations, but count them in the sim numbering
+        int initYear = year, initMonth = month, initDate = day, initHour = 0, initMin = 0, initSec = 0;
+        double t_end = 24*3600;//1*24*3600; // Duration of simulation
+
+        int startAt = 0; // Set to >0 to skip one or more simulations, but count them in the sim numbering
 
         // Domain settings and farm layout:
-        boolean includeExtPos = false; // Include ext O2 sensor position (barge) placed (-2.39 , -0.36) frames from the center of the upper left cage
-        //boolean[][] cageGrid = new boolean[][] {{true, true}, {true, false}, {true, true}, {true, false}};
-        int[] cageGrid = new int[] {4, 2};
-        int[][] cagePos = new int[][] {{0, 0}, {0, 1}, {1, 1}, {2, 0}, {2, 1}, {3, 1}};
-
-        //boolean[][] cageGrid = new boolean[][] {{true, true}, {true, false}, {true, true}, {true, false}};
-
+        int [] cageGrid=null;
+        int[][] cagePos=null;
         double frameSize = 90; // Rammefortøyning
         double outerPadding = 75; // Ekstra rom utenfor rammefortøyningene
-        double outerPaddingLeft = includeExtPos ? 3*frameSize : outerPadding;
-        double farmRotation = 42;// 42 er mer riktig enn 45 i hht. Google Earth-bilde. 45; // degrees of rotation of the model domain from north-east orientation.
-            // Current directions should be rotated by -1 times this angle
+        double farmRotation = 0; // Current directions should be rotated by -1 times this angle
+        double[] spaghettiRad = null, spaghettiDepth = null; // Cage definitions
+        int[] feedStartEnd = null;
+        switch (lokNo) {
+            case 1:
+                cageGrid = new int[] {6, 1};
+                cagePos = new int[][] {{5, 0}, {4, 0}, {3, 0}, {2, 0}, {1, 0}, {0, 0}};
+                farmRotation = -81.12; // Current directions should be rotated by -1 times this angle
+                // Location is nearly north-south oriented, so north in the model should be to the
+                // right and slightly up
+                spaghettiRad = new double[] {25.5, 17.8}; // Radius ved overflaten og ved bunntau
+                spaghettiDepth = new double[] {20, 38}; // Dybde bunntau og bunn not
+                feedStartEnd = new int[] {7*3600, 19*3600}; // Fra Bremnes: Vi starter opp med ca. 3 måltider mellom 07:00 og 19:00
+                outerPadding = 100;
+                break;
+            case 2: // Prestholmane
+                frameSize = 110; // men avstanden mellom de to rekkene er mindre, ca 85 m
+                cageGrid = new int[] {4, 3};
+                cagePos = new int[][] {{0, 0}, {1, 0}, {2, 0}, {3, 0}, {0, 2}, {1, 2}, {2, 2}, {3, 2}};
+                farmRotation = 26.2481; // Current directions should be rotated by -1 times this angle
+                spaghettiRad = new double[] {25.5, 17.8}; // Radius ved overflaten og ved bunntau
+                spaghettiDepth = new double[] {20, 38}; // Dybde bunntau og bunn not
+                feedStartEnd = new int[] {7*3600, 19*3600}; // Fra Bremnes: Vi starter opp med ca. 3 måltider mellom 07:00 og 19:00
+                outerPadding = 100;
+                break;
+            case 3:
+                frameSize = 85; // Basert på skisse av anlegg
+                cageGrid = new int[] {6, 3};
+                cagePos = new int[][] {{5, 2}, {4, 2}, {3, 2}, {2, 2}, {1, 2}, {0, 2},
+                        {5, 0}, {4, 0}, {3, 0}, {2, 0}, {1, 0}, {0, 0}};
+                farmRotation = -83.0; // Current directions should be rotated by -1 times this angle
+                // Location is nearly north-south oriented, so north in the model should be to the
+                // right and slightly up
+                spaghettiRad = new double[] {25.5, 17.8}; // Radius ved overflaten og ved bunntau
+                spaghettiDepth = new double[] {20, 38}; // Dybde bunntau og bunn not
+                feedStartEnd = new int[] {7*3600, 19*3600}; // Fra Bremnes: Vi starter opp med ca. 3 måltider mellom 07:00 og 19:00
+                outerPadding = 115;
+        }
+
 
         // Sensor depths (all horizontal positions will be equipped with sensors at all depths:
         double[] sensorDepths = new double[] {5, 10, 15};
         // Angle positions of sensors at outer edge of each tank (0 degrees refers to north):
         double[] sensorAngles = new double[] {128.2948, 2.8445, 246.8427};
 
-        double[] domainDims = new double[] {outerPadding + outerPaddingLeft + frameSize*cageGrid[0],
+        double[] domainDims = new double[] {outerPadding + outerPadding + frameSize*cageGrid[0],
                 2*outerPadding + frameSize*cageGrid[1]};
         System.out.println("Domain dims: "+domainDims[0]+" x "+domainDims[1]);
         ArrayList<double[]> cagePositions = new ArrayList<>();
+
         for (int i=0; i<cagePos.length; i++) {
-            cagePositions.add(new double[] {outerPaddingLeft + frameSize*((double)(cagePos[i][0]) +0.5),
-                outerPadding + frameSize*(((double)cagePos[i][1]) +0.5)});
+            if (lokNo != 2)
+                cagePositions.add(new double[] {outerPadding + frameSize*((double)(cagePos[i][0]) +0.5),
+                        outerPadding + frameSize*(((double)cagePos[i][1]) +0.5)});
+            else {
+                // Ta høyde for kortere avstand mellom radene på Prestholmane:
+                double ypos = 0;
+                if (cagePos[i][1] == 0) // Nederste rad
+                    ypos = outerPadding + frameSize*(0.5 + 0.125);
+                else
+                    ypos = outerPadding + frameSize*(2.5 - 0.125);
+                cagePositions.add(new double[] {outerPadding + frameSize*((double)(cagePos[i][0]) +0.5), ypos});
+            }
             double[] pos = cagePositions.get(cagePositions.size()-1);
             System.out.println("Cage: "+pos[0]+" x "+pos[1]);
 
@@ -148,26 +208,24 @@ public class FullFarmSimulation2 {
 
 
         // Cage settings:
-        double rad = 25;
-        double depth = 25, totDepth = 25; // Cage size (m)
-        double dxy = 2, dz = 2; // Model resolution (m)
+        double rad = spaghettiRad[0];
         double dt = .5 * dxy; // Time step (s)
-        int storeIntervalFeed = 600, storeIntervalInfo = 60;
-        double fishMaxDepth = 20; // The maximum depth of the fish under non-feeding conditions
+        int storeIntervalFeed = 7200, storeIntervalInfo = 60;
+        boolean storeO2Histograms = true;
+        double depthDomain = 38;
+
+        System.out.println("Resolution: "+dxy+" , "+dz);
+
+
+        double fishMaxDepth = 38; // The maximum depth of the fish under non-feeding condition
 
         double currentReductionFactor = 0.8; // Multiplier for inside current as function of outside
-        if (decreasingCurrentFactor)
-            currentReductionFactor = 0.8 + 0.05 - ((double)daysToAdd)*(0.2/*0.25*//8.0);
-
-        if (useCurrentMagic)
-            currentReductionFactor = 1.0;
 
 
         // Environmental conditions:
         double currentSpeedInit = 2*0.04; // External current speed (m/s)
         double T_w = 14; double avO2 = 9; // mg / l
-        //double T_w = 16; double avO2 = 8*0.9612; // mg / l
-        //double T_w = 12; double avO2 = 8*1.0418; // mg / l
+
 
         // Oxygen diffusion constant. To be set dependent on current speed.
         double diffKappaO2 = 0.1, diffKappaO2Z = 0.1;
@@ -177,11 +235,6 @@ public class FullFarmSimulation2 {
         double[] currentOffset_r = new double[] {0,0,0}; // Perturbed global current vector
 
 
-        // Fish setup (N, mean weight and std.dev weight):
-        double nFishBjoroya = cagePositions.size()*169821; // Estimated number of individuals in experimental period (source: FishTalk data)
-        double meanWeight = 2869.5; // Estimated mean weight in experimental period (source: FishTalk data)
-        double[] wFish = new double[] {meanWeight, 0.2*meanWeight};
-        
         // Wind speed (x, y components in m/s) affecting feed spreader:
         double[] windSpeed = new double[] {0, 0};
 
@@ -202,8 +255,8 @@ public class FullFarmSimulation2 {
         // Set up cage dimensions and cage grid:
         cageDims[0] = (int)Math.ceil(domainDims[0]/dxy);
         cageDims[1] = (int)Math.ceil(domainDims[1]/dxy);
-        cageDims[2] = (int)Math.ceil(depth/dz)+1;
-        mask = CageMasking.fullFarmMasking(cageDims, dxy, cagePositions, rad, false);
+        cageDims[2] = (int)Math.ceil(depthDomain/dz)+1;
+        mask = CageMasking.fullFarmMaskingSpaghetti(cageDims, dxy, dz, cagePositions, spaghettiRad, spaghettiDepth, false);
         boolean useWalls = false;
 
         System.out.println("Domain dimensions: ("+cageDims[0]+", "+cageDims[1]+", "+cageDims[2]+")");
@@ -219,9 +272,11 @@ public class FullFarmSimulation2 {
 
         // Feeding periods (start/end in s):
         // Fra Eskil (Bjørøya): måltidene varte fra ca. kl. 07:30-17:30, i gjennomsnitt.
-        int[][] feedingPeriods = new int[][] {{27000, 63000}, {86400+27000, 86400+63000}, {2*86400+27000, 2*86400+63000},
-                {3*86400+27000, 3*86400+63000}, {4*86400+27000, 4*86400+63000}, {5*86400+27000, 5*86400+63000},
-                {6*86400+27000, 6*86400+63000}, {7*86400+27000, 7*86400+63000}};
+        int[][] feedingPeriods = new int[][] {{feedStartEnd[0], feedStartEnd[1]},
+                {86400+feedStartEnd[0], 86400+feedStartEnd[1]},
+                {2*86400+feedStartEnd[0], 2*86400+feedStartEnd[1]},
+                {3*86400+feedStartEnd[0], 3*86400+feedStartEnd[1]},
+                {4*86400+feedStartEnd[0], 4*86400+feedStartEnd[1]}};
         int nPeriods = feedingPeriods.length;
         /*int[][] feedingPeriods = new int[][] {{1*3600, 2*3600}, {3*3600, 4*3600}, {5*3600, 6*3600},
                 {7*3600, 8*3600}, {9*3600, 10*3600}, {11*3600, 12*3600}, {13*3600, 14*3600}, {15*3600, 16*3600},
@@ -243,18 +298,66 @@ public class FullFarmSimulation2 {
             ambientTemp[i] = T_w;
         }
 
-        // Determine number of fish, and feeding rate:
-        double nFish = nFishBjoroya;
-        System.out.println("N fish = "+nFish);
-        double nominalFeedingRate = cagePositions.size()*2900.*1000/(10*3600); // Approximate feeding over 10 hours based on FishTalk data
-        double feedingRateMult = 0; // Set each timestep
-        System.out.println("Feeding rate = "+nominalFeedingRate);
 
         // Oxygen sensor positions:
         Measurements.MeasurementSet ms = Measurements.setupSensorPositionsAllCages(dxy, dz, rad,
                 sensorDepths, sensorAngles, farmRotation,
-                includeExtPos, frameSize, cagePositions);
+                false, frameSize, cagePositions);
+        if (lokNo == 1) { // Apalvikneset
+            // Add sensor position in cage 3:
+            int[] sPos = new int[3];
+            double[] cage3 = cagePositions.get(2);
+            sPos[0] = (int) ((cage3[0] - 0.5 * spaghettiRad[0])/ dxy);
+            sPos[1] = (int) (cage3[1] / dxy);
+            sPos[2] = (int) (5. / dz);
+            System.out.println(">>> C3 sensor "+sPos[0]+" "+sPos[1]);
+            ms.addMeasurement("C3_sensor", sPos);
+            // Add sensor position at barge. 80% of a frame width "down" from the center of cage 4
+            int[] sPos2 = new int[3];
+            double[] cage4 = cagePositions.get(3);
+            sPos2[0] = (int) (cage4[0]/ dxy);
+            sPos2[1] = (int) ((cage4[1] - spaghettiRad[0] - 0.8*frameSize)/ dxy);
+            sPos2[2] = (int) (5. / dz);
+            ms.addMeasurement("barge_sensor", sPos2);
+        } else if (lokNo == 2) { // Prestholmane
+                // Add sensor position in cage 3
+                int[] c8Pos = new int[3];
+                double[] cage8 = cagePositions.get(7);
+                c8Pos[0] = (int) ((cage8[0] + 0.35 * spaghettiRad[0]) / dxy); // Half radius 45 degrees "southeast"
+                c8Pos[1] = (int) ((cage8[1] - 0.35 * spaghettiRad[0]) / dxy);
+                c8Pos[2] = (int) (5. / dz);
+                ms.addMeasurement("C8_sensor", c8Pos);
+                // Add sensor position at barge
+                double[] cage4 = cagePositions.get(3);
+                int[] bPos = new int[3];
+                bPos[0] = (int) ((cage8[0] + frameSize)/ dxy);
+                bPos[1] = (int) (0.5*(cage8[1] + cage4[1]) / dxy);
+                bPos[2] = (int) (5. / dz);
+                ms.addMeasurement("barge_sensor", bPos);
 
+        } else if (lokNo == 3) { // Svollandsneset
+            // Add sensor position in cage 3
+            int[] c3Pos = new int[3];
+            double[] cage3 = cagePositions.get(2);
+            c3Pos[0] = (int) (cage3[0] / dxy);
+            c3Pos[1] = (int) ((cage3[1] + 0.5 * spaghettiRad[0]) / dxy);
+            c3Pos[2] = (int) (5. / dz);
+            ms.addMeasurement("C3_sensor", c3Pos);
+            // Add sensor position in cage 6
+            int[] c6Pos = new int[3];
+            double[] cage6 = cagePositions.get(5);
+            c6Pos[0] = (int) (cage6[0] / dxy);
+            c6Pos[1] = (int) ((cage3[1] - 0.5 * spaghettiRad[0]) / dxy);
+            c6Pos[2] = (int) (5. / dz);
+            ms.addMeasurement("C6_sensor", c6Pos);
+            // Add sensor position at barge
+            double[] cage12 = cagePositions.get(11);
+            int[] bPos = new int[3];
+            bPos[0] = (int) ((cage12[0] -1.5*frameSize)/ dxy);
+            bPos[1] = (int) (0.5*(cage3[1] + cage12[1]) / dxy);
+            bPos[2] = (int) (5. / dz);
+            ms.addMeasurement("barge_sensor", bPos);
+        }
         // Feed affinity:
         double[][][] affinity = new double[cageDims[0]][cageDims[1]][cageDims[2]];
         for (int i=0; i<cageDims[0]; i++)
@@ -275,9 +378,7 @@ public class FullFarmSimulation2 {
         double[] affProfile_orig = new double[] {0.0110, 0.0913, 0.8601, 2.1406, 2.7774, 2.6903, 2.5195, 2.2987, 2.0137,
                 1.7448, 1.5883, 1.3667, 1.2348, 1.0724, 0.9379, 0.7764, 0.7104, 0.5895, 0.5607, 0.4668, 0.3933,
                 0.4009, 0.2935, 0.1801, 0.1260, 0.0787, 0.0457, 0.0304};
-        double[] affProfile_half = new double[] {0.5055, 0.5457, 0.9301, 1.5703, 1.8887, 1.8452, 1.7597, 1.6494, 1.5069,
-                1.3724, 1.2942, 1.1834, 1.1174, 1.0362, 0.9690, 0.8882, 0.8552, 0.7947, 0.7804, 0.7334, 0.6966, 0.7004,
-                0.6467, 0.5901, 0.5630, 0.5393, 0.5228, 0.5152};
+
         double[] affProfile_flat = new double[] {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
         double[] affProfile = useVerticalDist ? affProfile_orig : affProfile_flat;
@@ -297,6 +398,7 @@ public class FullFarmSimulation2 {
         }*/
         double[][][] o2Affinity = new double[cageDims[0]][cageDims[1]][cageDims[2]];
         double o2AffSum = setO2AffinityWithVerticalProfile(cageDims, dz, fishMaxDepth, mask, affinityProfile, o2Affinity, affinity);
+        double[] o2AffSums = MultiCageUtils.getO2AffSums(cagePositions, dxy, rad, o2Affinity);
         //double o2AffSum = setO2AffinityWithVerticalProfileAndEdgeDecrease(cageDims, rad, dxy, dz, fishMaxDepth, mask, affinityProfile, o2Affinity, affinity);
         int availableCellsForO2Uptake = countAvailableCellsForOxygenUptake(cageDims, dz, fishMaxDepth, mask);
 
@@ -304,7 +406,7 @@ public class FullFarmSimulation2 {
         double[] ambientValueO2 = new double[cageDims[2]];
         double[] ambientValueO2_r = new double[cageDims[2]]; // Possibly perturbed ambient value of O2
         for (int i = 0; i < ambientValueO2.length; i++) {
-            ambientValueO2[i] = avO2;
+            ambientValueO2[i] = constantAmbVal;
         }
 
         // If we are running in EnKF mode, let rank 0 initialize the EnKF class:
@@ -346,9 +448,7 @@ public class FullFarmSimulation2 {
             hydro = SimpleTankHydraulics.getProfileHydraulicField(cageDims, currentProfile);
 
 
-            //AdvectPellets ap = new AdvectPellets();
-
-            AdvectPelletsVarCurr ap = new AdvectPelletsVarCurr();
+            AdvectPellets ap = new AdvectPellets();
 
             AdvectPellets apOx = new AdvectPellets();
             //AdvectPelletsVarCurr apOx_vc = new AdvectPelletsVarCurr();
@@ -363,11 +463,42 @@ public class FullFarmSimulation2 {
             System.out.println("Unit string: "+unitString);
 
             // Initialize environmental input data:
-            String inDataFile = "C:/Users/alver/OneDrive - NTNU/prosjekt/O2_Bjørøya/bjoroya_data.nc";
+            String inDataFileName = lokalitet+"_data.nc";
+            String inDataFile = "C:/Users/alver/OneDrive - NTNU/prosjekt/PROHAV/NMBU-studie/"+inDataFileName;
             if (!(new File(inDataFile)).exists())
-                inDataFile = "bjoroya_data.nc";
-            InputDataNetcdf inData = new InputDataNetcdf(inDataFile, true);
+                inDataFile = inDataFileName;
+            InputDataNMBUStudy inData = new InputDataNMBUStudy(inDataFile);
             inData.setStartTime(startTime);
+
+            // Read weight and count data for the simulation time:
+            String invDataFileName = lokalitet+"_inventory.nc";
+            String invDataFile = "C:/Users/alver/OneDrive - NTNU/prosjekt/PROHAV/NMBU-studie/"+invDataFileName;
+            if (!(new File(invDataFile)).exists())
+                invDataFile = invDataFileName;
+            InventoryNMBUStudy inv = new InventoryNMBUStudy(invDataFile, startTime);
+            double[] weight = inv.getWeight(); // Average weight per cage
+            double[] count = inv.getCount(); // Estimated count per cage
+            double[] feed = inv.getFeed(); // Estimated count per cage
+            SimpleFish[] fish = new SimpleFish[cagePositions.size()];
+            double totN = 0, totWeight = 0;
+            for (int i=0; i<fish.length; i++) {
+                // Initialize simple (grouped) fish model:
+                fish[i] = new SimpleFish(count[i], weight[i], 0.2*weight[i]);
+                totN += count[i];
+                totWeight += count[i]*weight[i];
+                System.out.println("Cage "+i+": count="+count[i]+", weight="+weight[i]+", feed="+feed[i]);
+            }
+            System.out.println("Tot N: "+totN+" , Avg weight: "+(totWeight/totN));
+            double[][][] fishTmp = new double[fish[0].getNGroups()][1][1];
+
+            // Determine nominal feeding rate:
+            double nominalFeedingRate = 0;//cagePositions.size()*2900.*1000/(10*3600); // Approximate feeding over 10 hours based on FishTalk data
+            for (int ii=0; ii<feed.length; ii++)
+                nominalFeedingRate += feed[ii];
+            nominalFeedingRate /= (10*3600);
+
+            double feedingRateMult = 0; // Set each timestep
+            System.out.println("Feeding rate = "+nominalFeedingRate);
 
             NumberFormat nf = NumberFormat.getNumberInstance(Locale.US);
             nf.setMaximumFractionDigits(2);
@@ -378,18 +509,19 @@ public class FullFarmSimulation2 {
             double[][][] o2 = new double[cageDims[0]][cageDims[1]][cageDims[2]];
             double[][][] ingDist = new double[cageDims[0]][cageDims[1]][cageDims[2]];
             double[][][] o2consDist = new double[cageDims[0]][cageDims[1]][cageDims[2]];
-            AdvectPellets.initField(o2, avO2);
+            System.out.println("Using constant ambient value: "+constantAmbVal);
+            AdvectPellets.initField(o2, constantAmbVal);//avO2);
             AdvectPellets.initField(ingDist, 0);
             double outFlow = 0., outFlow_net = 0.;
 
             // Initialize O2 field based on first ambient values:
-            double[] ambVal = new double[] {inData.getO2Ambient5(), inData.getO2Ambient10(), inData.getO2Ambient15()};
-            interpolateVertical(ambientValueO2, new double[] {5, 10, 15}, ambVal, cageDims[2], dz);
-            for (int i=0; i<cageDims[0]; i++)
+            //double[] ambVal = new double[] {inData.getO2Ambient5(), inData.getO2Ambient10(), inData.getO2Ambient15()};
+            //interpolateVertical(ambientValueO2, new double[] {5, 10, 15}, ambVal, cageDims[2], dz);
+            /*for (int i=0; i<cageDims[0]; i++)
                 for (int j=0; j<cageDims[1]; j++)
                     for (int k=0; k<cageDims[2]; k++) {
                         o2[i][j][k] = ambientValueO2[k];
-                    }
+                    }*/
 
 
             // Setup of surface feeding:
@@ -397,34 +529,36 @@ public class FullFarmSimulation2 {
             double[][] fTemp = new double[cageDims[0]][cageDims[1]];
 
             double[][] surfFeed = new double[cageDims[0]][cageDims[1]];
+            double totFeed = 0;
             for (int i=0; i<feedingPos.length; i++) {
+                totFeed += feed[i];
                 PelletSpreaderModel.setPelletDist(fTemp, feedingPos[i][0], feedingPos[i][1], dxy, 0, 35, 0, true, windSpeed, null);
                 // Add to total distribution:
                 for (int ii=0; ii<surfFeed.length; ii++)
                     for (int jj = 0; jj < surfFeed[ii].length; jj++) {
-                        surfFeed[ii][jj] = surfFeed[ii][jj] + fTemp[ii][jj];
+                        surfFeed[ii][jj] = surfFeed[ii][jj] + feed[i]*fTemp[ii][jj];
                     }
             }
-
+            System.out.println("totFeed = "+totFeed);
             for (int i=0; i<surfFeed.length; i++)
                 for (int j=0; j<surfFeed[i].length; j++) {
-                    feedingRate[i][j][0] = surfFeed[i][j]/((double)feedingPos.length);
+                    feedingRate[i][j][0] = surfFeed[i][j]/totFeed;//((double)feedingPos.length);
                 }
             sourceTerm = feedingRate;
 
-            // Initialize simple (grouped) fish model:
-            SimpleFish fish = new SimpleFish(nFish, wFish[0], wFish[1]);
-            double[][][] fishTmp = new double[fish.getNGroups()][1][1];
 
-            SimpleDateFormat filenameForm = new SimpleDateFormat("dd_MM");
-            String filePrefix = simNamePrefix+filenameForm.format(startTime);
+
+            SimpleDateFormat filenameForm = new SimpleDateFormat("yyyy_MM_dd");
+            String filePrefix = simNamePrefix+"_"+filenameForm.format(startTime);
 
             // Establish file names to write data to:
             NetcdfFileWriteable ncfile = null;
             NetcdfFileWriteable fishfile = null;
+            NetcdfFileWriteable histfile = null;
             String ncfilePath = saveDir + filePrefix + simNamePostfix + (doMPI ? "_"+String.format("%02d", rank) : "")+".nc";
             String fishfilePath = saveDir + filePrefix + simNamePostfix + (doMPI ? "_"+String.format("%02d", rank) : "")+"_fish.nc";
-            boolean firstStore3d = true, firstStoreScalars = true;
+            String histFilePath = saveDir + filePrefix + simNamePostfix + (doMPI ? "_"+String.format("%02d", rank) : "")+"_hist.nc";
+            boolean firstStore3d = true, firstStoreScalars = true, firstStoreHist = true;
 
             double totFeedAdded = 0;
 
@@ -437,52 +571,62 @@ public class FullFarmSimulation2 {
                 double tMin = t / 60;
 
                 if (inData.advance(t) || (i==0)) {
-                    //System.out.println("Updating environment: t = "+t);
+                    System.out.println("Updating environment: t = "+t);
 
-                    double[] tempVal = {inData.getTemperature5(), inData.getTemperature10(), inData.getTemperature15()};
-                    //tempVal[0] = 18; tempVal[1] = 10; tempVal[2] = 2;
-                    interpolateVertical(ambientTemp, new double[]{5, 10, 15}, tempVal, cageDims[2], dz);
-                    ambVal = new double[]{inData.getO2Ambient5(), inData.getO2Ambient10(), inData.getO2Ambient15()};
-                    //ambVal[0] = 9; ambVal[1] = 9; ambVal[2] = 9;
-                    //double[] ambVal = {2., 10., 5.};
-                    interpolateVertical(ambientValueO2, new double[]{5, 10, 15}, ambVal, cageDims[2], dz);
-                    /*for (int j = 0; j < tempVal.length; j++) {
-                        double v = tempVal[j];
-                        System.out.println("Temp val: "+v);
+                    double[] obsCurrentDepths = inData.getCurrentDepths();
+                    double[] tempVal = inData.getTemperatureProfile();
+                    interpolateVertical(ambientTemp, obsCurrentDepths, tempVal, cageDims[2], dz);
+
+                    /*for (int j = 0; j < obsCurrentDepths.length; j++) {
+                        System.out.println("Temp depth: "+obsCurrentDepths[j]+" T="+tempVal[j]);
                     }
                     for (int j = 0; j < ambientTemp.length; j++) {
-                        double v = ambientTemp[j];
-                        System.out.println((i+1)+": "+v);
+                        System.out.println("i="+j+", interpolated T="+ambientTemp[j]);
                     }*/
 
+                    //double[] ambVal = new double[]{inData.getO2Ambient5()};//, inData.getO2Ambient10(), inData.getO2Ambient15()};
+                    for (int j=0; j<ambientValueO2.length; j++)
+                        ambientValueO2[j] = constantAmbVal;
 
-                    //currentSpeed = inData.getExtCurrentSpeed();
-                    //currentDirection = inData.getExtCurrentDir();
+                    //ambVal[0] = 9; ambVal[1] = 9; ambVal[2] = 9;
+                    //double[] ambVal = {2., 10., 5.};
+                    //interpolateVertical(ambientValueO2, new double[]{5, 10, 15}, ambVal, cageDims[2], dz);
+
+
+
                     double[] obsCurrentProfile = inData.getExtCurrentSpeedProfile();
                     double[] obsCurrentDirProfile = inData.getExtCurrentDirProfile();
                     double[] obsCurrentComp1 = new double[obsCurrentProfile.length],
                             obsCurrentComp2 = new double[obsCurrentProfile.length];
-                    // Current directions are given as the direction the current flows towards, with
-                    // 0 degrees being north and 90 degrees being east. Verified by comparing histograms
-                    // with the textual descriptions in the report by Aqua Kompetanse.
-                    // x component: speed*sin(direction)
-                    // y component: speed*cos(direction)
-                    // Since the model domain is rotated we need to adjust the direction to compensate.
-                    for (int j = 0; j < obsCurrentComp1.length; j++) {
-                        obsCurrentComp1[j] = currentReductionFactor *
-                                obsCurrentProfile[j] * Math.sin((obsCurrentDirProfile[j] - farmRotation) * Math.PI / 180.);
-                        obsCurrentComp2[j] = currentReductionFactor *
-                                obsCurrentProfile[j] * Math.cos((obsCurrentDirProfile[j] - farmRotation) * Math.PI / 180.);
-                    }
 
-                    double[] obsCurrentDepths = inData.getCurrentDepths();
+
+                    System.out.println("orig dir="+(obsCurrentDirProfile[0])+" / orig spd="+
+                            obsCurrentProfile[0]);
+
+                    // TODO: Since the model domain is rotated we need to adjust the direction to compensate.
+                    for (int j = 0; j < obsCurrentComp1.length; j++) {
+                        obsCurrentComp1[j] = currentReductionFactor*
+                                obsCurrentProfile[j]*Math.sin((obsCurrentDirProfile[j]-farmRotation)*Math.PI/180.);
+                        obsCurrentComp2[j] = currentReductionFactor*
+                                obsCurrentProfile[j]*Math.cos((obsCurrentDirProfile[j]-farmRotation)*Math.PI/180.);
+                    }
+                    //System.out.println("u="+obsCurrentComp1[0]+" / v="+obsCurrentComp2[0]+" / origdir="+obsCurrentDirProfile[0]+", farmrotation="+farmRotation);
+                    /*for (int j = 0; j < obsCurrentComp1.length; j++) {
+                        System.out.println("i="+j+", u="+obsCurrentComp1[j]+" / v="+obsCurrentComp2[j]);
+                    }*/
+
                     double[] interpProfile1 = new double[cageDims[2]],
                             interpProfile2 = new double[cageDims[2]];
                     interpolateVertical(interpProfile1, obsCurrentDepths, obsCurrentComp1, cageDims[2], dz);
                     interpolateVertical(interpProfile2, obsCurrentDepths, obsCurrentComp2, cageDims[2], dz);
 
+                    /*for (int j = 0; j < interpProfile1.length; j++) {
+                        System.out.println("Interpolated: i="+j+", u="+interpProfile1[j]+" / v="+interpProfile2[j]);
+                    }*/
+
                     for (int j = 0; j < interpProfile1.length; j++) {
-                        //System.out.println("Interpolated current speed "+(j)+": "+interpProfile1[j]+" / "+interpProfile2[j]);
+                        //if (j==0)
+                        //    System.out.println("Interpolated current speed "+(j)+": "+interpProfile1[j]+" / "+interpProfile2[j]);
                         currentProfile[j][0] = interpProfile1[j];
                         currentProfile[j][1] = interpProfile2[j];
                         currentProfile[j][2] = 0.;
@@ -503,6 +647,7 @@ public class FullFarmSimulation2 {
                         cmf.setCurrentField(hydro, lSpeeds, lDirections);
                     }
                 }
+
 
                 // Update variable current speed offset:
                 currentOffset[0] = 0.;//currentReductionFactor*currentSpeed*Math.cos(currentDirection*Math.PI/180.);
@@ -616,10 +761,12 @@ public class FullFarmSimulation2 {
                     o2Cons_perturb_r += parVal[3];*/
                 }
 
+                //System.out.println("Feedingratemult = "+feedingRateMult);
                 double[] r = ap.step(dt, fc, dxy, dz, useWalls, mask, sinkingSpeed, diffKappa, diffKappaZ, 
                         hydro, currentOffset, sourceTerm, feedingRateMult, ambientValueFeed);
                 outFlow = r[0]; // Feed lost from grid (not used)
                 outFlow_net = r[1]; // Feed lost from the unmasked part of the grid (feed lost through side)
+
 
                 double[] o2OutFlow = apOx.step(dt, o2, dxy, dz, useWalls, mask, 0, diffKappaO2, diffKappaO2Z,
                         hydro, currentOffset_r, feedingRate, 0, ambientValueO2_r);
@@ -632,33 +779,21 @@ public class FullFarmSimulation2 {
 //                    System.out.println("1");
 //                }
 
-                double[] res = IngestionAndO2Tempprofile.calculateIngestion(dt, fc, o2, affinity, o2Affinity, o2AffSum,
-                        availableCellsForO2Uptake, ingDist, o2consDist, dxy, dz, mask, pelletWeight, ambientTemp, fish, 1.0, false);
-                double totalIntake = res[0], rho = res[1], o2ConsumptionRate = res[2];
+                double totalIntake = 0, o2ConsumptionRate = 0;
+                double rho = 0;
+                for (int ii=0; ii<cagePositions.size(); ii++) {
+                    int[][] ranges = MultiCageUtils.getRanges(cagePositions.get(ii), dxy, rad);
+
+                    double[] res = IngestionAndO2Subgrid.calculateIngestion(dt, fc, o2, affinity, o2Affinity,
+                            o2AffSums[ii], ranges, ingDist, o2consDist, dxy, dz, mask, pelletWeight, ambientTemp, fish[ii], 0, false);
+                    totalIntake += res[0];
+                    rho += res[1];
+                    o2ConsumptionRate += res[2];
+                }
+                rho /= (double)(cagePositions.size());
 
                 t = t + dt;
 
-                // Check if we are running with EnKF. If so, check if it is time to do model correction:
-                if (doMPI && i>0 && ((t/((double)as.assimInterval) - Math.floor(t/(double)as.assimInterval)) < 1e-5)) {
-                    double[][] X = mpi.gatherStateToRank0(o2, parVal);
-                    if (isRoot) {
-                        System.out.println("Calling EnKF");
-                        long tic = System.currentTimeMillis();
-                        double[][] X_a = enKF.doAnalysis(t, X, as, inData, filePrefix+"_ens.nc");
-                        long duration = System.currentTimeMillis() - tic;
-                        if (duration > 1000L)
-                            System.out.println("Analysis took "+(duration/1000L)+" seconds.");
-                        else
-                            System.out.println("Analysis took "+duration+" ms.");
-                        if (!as.dryRun && !as.isDropOutActive(t)) { // We only apply corrections if we are not doing a dry run and not in a dropout interval
-                            mpi.distributeAnalysisFromRank0(X_a, o2, parVal, cageDims, as.nPar);
-                        }
-                    } else if (!as.dryRun && !as.isDropOutActive(t)) { // We only apply corrections if we are not doing a dry run and not in a dropout interval
-                        if (!as.useTwin || (rank < N-1)) {
-                            mpi.receiveAnalysisFromRank0(o2, parVal, cageDims, as.nPar);
-                        }
-                    }
-                }
 
                 if (i>0 && ((t/((double)storeIntervalFeed) - Math.floor(t/(double)storeIntervalFeed)) < 1e-5)) {
                     double elapsed = (double) ((System.currentTimeMillis() - stime)) / 60000.;
@@ -668,7 +803,7 @@ public class FullFarmSimulation2 {
 
                     if (firstStore3d) {
                         firstStore3d = false;
-                        ncfile = SaveNetCDF.initializeFile(ncfilePath, cageDims, 1, 1, unitString, ms);
+                        ncfile = SaveNetCDF.initializeFile(ncfilePath, cageDims, dxy, dz, unitString, ms);
                         SaveNetCDF.createCageVariables(ncfile, "feed", "ingDist", "o2", "o2consDist");
 
                         // Make string describing cage layout:
@@ -676,7 +811,9 @@ public class FullFarmSimulation2 {
                         for (double[] cp : cagePositions) {
                             sb2.append(cp[0]).append(",").append(cp[1]).append(";");
                         }
+                        System.out.println(sb2.toString());
                         ncfile.addGlobalAttribute("cagePositions", sb2.toString());
+                        ncfile.addGlobalAttribute("cageRad", spaghettiRad[0]);
                     }
                     else {
                         try {
@@ -704,7 +841,7 @@ public class FullFarmSimulation2 {
 
                     if (firstStoreScalars) {
                         firstStoreScalars = false;
-                        fishfile = SaveNetCDF.initializeFile(fishfilePath, new int[]{fish.getNGroups(), 1, cageDims[2]}, 1, 1, unitString, ms);
+                        fishfile = SaveNetCDF.initializeFile(fishfilePath, new int[]{fish[0].getNGroups(), 1, cageDims[2]}, 1, 1, unitString, ms);
                         SaveNetCDF.createProfileVariable(fishfile, "appetite", 0);
                         SaveNetCDF.createProfileVariable(fishfile, "ingested", 0);
                         SaveNetCDF.createProfileVariable(fishfile, "V", 0);
@@ -733,25 +870,41 @@ public class FullFarmSimulation2 {
                         }
                     }
 
-                    double[] groupArray = new double[fish.getNGroups()];
+                    if (storeO2Histograms) {
+                        if (firstStoreHist) {
+                            firstStoreHist = false;
+                            histfile = SaveNetCDF.initializeHistogramFile(histFilePath, MultiCageUtils.getBinEdges(), cagePos.length, unitString);
+                        }
+                        else {
+                            try {
+                                histfile = NetcdfFileWriteable.openExisting(histFilePath);
+                            } catch (IOException e) {
+                                e.printStackTrace();
+                            }
+                        }
+                    }
+
+                    double[] groupArray = new double[fish[0].getNGroups()];
 
                     for (int j = 0; j < fishTmp.length; j++)
-                        groupArray[j] = fish.getV(j);
+                        groupArray[j] = fish[0].getV(j);
                     SaveNetCDF.saveProfileVariable(fishfile, t, "V", 0, groupArray, true);
                     SaveNetCDF.saveScalarVariable(fishfile, t, "waste", outFlow, false);
                     SaveNetCDF.saveScalarVariable(fishfile, t, "waste_net", outFlow_net, false);
                     
                     double totI = 0, totIngRate = 0;
-                    for (int j = 0; j < fishTmp.length; j++) {
-                        groupArray[j] = fish.getIngested(j);
-                        totI += fish.getN(j) * fishTmp[j][0][0];
-                        totIngRate += fish.getN(j) * fish.getIngRate(j);
+                    for (int cageI=0; cageI<cagePositions.size(); cageI++) {
+                        for (int j = 0; j < fishTmp.length; j++) {
+                            groupArray[j] = fish[cageI].getIngested(j);
+                            totI += fish[cageI].getN(j) * fishTmp[j][0][0];
+                            totIngRate += fish[cageI].getN(j) * fish[0].getIngRate(j);
+                        }
                     }
                     SaveNetCDF.saveProfileVariable(fishfile, t, "ingested", 0, groupArray, false);
 
 
                     for (int j = 0; j < groupArray.length; j++) {
-                        groupArray[j] = fish.getAppetite(j);
+                        groupArray[j] = fish[0].getAppetite(j);
                     }
                     SaveNetCDF.saveProfileVariable(fishfile, t, "appetite", 0, groupArray, false);
 
@@ -806,7 +959,7 @@ public class FullFarmSimulation2 {
                     //SaveNetCDF.saveScalarVariable(fishfile, t, "frac_hypoxia", values[2], false);
 
                     ArrayList<CageStats> cageStats = MultiCageUtils.getCageStats(o2, mask, cagePositions, rad, dxy,
-                            HYPOXIA_THRESHOLD);
+                        HYPOXIA_THRESHOLD);
                     for (int ii=0; ii<cageStats.size(); ii++) {
                         CageStats st = cageStats.get(ii);
                         SaveNetCDF.saveScalarVariable(fishfile, t, "Cage_"+(ii+1)+"_min",
@@ -821,7 +974,6 @@ public class FullFarmSimulation2 {
                                 st.stats[5], false);
 
                     }
-
 
 
                     // Save o2 level at sensor positions:
@@ -840,6 +992,17 @@ public class FullFarmSimulation2 {
                     } catch (IOException e) {
                         e.printStackTrace();
                     }
+
+                    if (storeO2Histograms) {
+
+                        SaveNetCDF.saveHistograms(histfile, t, cageStats);
+
+                        try {
+                            histfile.close();
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    }
                 }
 
 
@@ -847,8 +1010,14 @@ public class FullFarmSimulation2 {
 
 
             double totI = 0;
-            for (int j = 0; j < fishTmp.length; j++) {
-                totI += fish.getN(j) * fish.getIngested(j);
+            for (int cageI=0; cageI<cagePositions.size(); cageI++) {
+                for (int j = 0; j < fishTmp.length; j++) {
+                    totI += fish[cageI].getN(j) * fish[cageI].getIngested(j);
+                    if (Double.isNaN(fish[cageI].getN(j)))
+                        System.out.println("fish.getN is NaN for j=" + j);
+                    if (Double.isNaN(fish[cageI].getIngested(j)))
+                        System.out.println("fish.getIngested is NaN for j=" + j);
+                }
             }
 
             System.out.println("totFeedAdded = " + totFeedAdded);

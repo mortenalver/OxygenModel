@@ -196,6 +196,7 @@ public class IngestionAndO2 {
         for (int i=0; i<fish.getNGroups(); i++) {
             fish.stepGutContent(i, dt, T_w);
             fish.addIngestion(i, dt*w_f[i]);
+
             fish.setIngRate(i, w_f[i]);
         }
 

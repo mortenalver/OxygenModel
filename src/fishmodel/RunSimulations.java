@@ -260,15 +260,6 @@ public class RunSimulations {
             ambientValueO2[i] = avO2;
         }
 
-        // If we are running in EnKF mode, let rank 0 initialize the EnKF class:
-        if (doMPI && (rank==0)) {
-            enKF = new EnsembleKF(simNamePrefix, cageDims, as.nPar, dxy, ms);
-        }
-
-        if (!doMPI && as.useEnOI) {
-            enOI = new EnOI(as, cageDims, dxy, ms);
-        }
-
         // Set up initial perturbation and parameter values:
         double ambientO2_perturb = 0;
         double[] current_perturb = new double[2];
@@ -293,6 +284,16 @@ public class RunSimulations {
         for (int sim=0; sim<nSim; sim++) {
             if (sim<startAt)
                 continue;
+
+            // If we are running in EnKF mode, let rank 0 initialize the EnKF class:
+            if (doMPI && (rank==0)) {
+                enKF = new EnsembleKF(simNamePrefix, cageDims, as.nPar, dxy, ms);
+            }
+
+            if (!doMPI && as.useEnOI) {
+                enOI = new EnOI(as, cageDims, dxy, ms);
+            }
+
             int feedingPeriodPiv = 0;
             boolean isFeeding = false;
 
@@ -494,7 +495,7 @@ public class RunSimulations {
                                 lSpeeds = new double[cageDims[2]];
                         for (int j = 0; j < cageDims[2]; j++) {
                             lSpeeds[j] = Math.sqrt(interpProfile1[j]*interpProfile1[j] + interpProfile2[j]*interpProfile2[j]);
-                            lDirections[j] = Math.atan2(interpProfile1[j], interpProfile2[j])*180./Math.PI;
+                            lDirections[j] = 90.-Math.atan2(interpProfile1[j], interpProfile2[i])*180./Math.PI;
 
                         }
                         cmf.setCurrentField(hydro, lSpeeds, lDirections);
@@ -630,7 +631,7 @@ public class RunSimulations {
 
                 double[] res = IngestionAndO2Tempprofile.calculateIngestion(dt, fc, o2, affinity, o2Affinity, o2AffSum,
                         availableCellsForO2Uptake, ingDist, o2consDist, dxy, dz, mask, pelletWeight, ambientTemp, fish,
-                        o2Cons_perturb_r);
+                        o2Cons_perturb_r, false);
                 double totalIntake = res[0], rho = res[1], o2ConsumptionRate = res[2];
 
 

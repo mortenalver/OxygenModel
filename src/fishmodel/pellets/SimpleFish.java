@@ -23,6 +23,7 @@ public class SimpleFish {
         for (int i=0; i<nGroups; i++) {
             N[i] = Nfish*Ndist[i];
             weight[i] = meanWeight + wDev[i]*stdevWeight;
+            //System.out.println("Group "+i+": N="+N[i]+", W="+weight[i]);
         }
     }
 
@@ -67,10 +68,28 @@ public class SimpleFish {
         return V[group];
     }
 
+    public void setAllV(double[] newV) {
+        for (int i = 0; i < V.length; i++) {
+            V[i] = newV[i];
+        }
+    }
+
     public void resetAllV() {
         for (int i = 0; i < V.length; i++) {
             V[i] = 0.;
         }
+    }
+
+    /**
+     * Calculate the average V (weighted by N values) for the entire fish group
+     * @return the average V
+     */
+    public double getAverageV() {
+        double totN = getTotalN();
+        double sumV = 0;
+        for (int i=0; i<V.length; i++)
+            sumV += N[i]*V[i];
+        return sumV/totN;
     }
 
     public double getIngested(int group) {
@@ -92,6 +111,8 @@ public class SimpleFish {
     public void addIngestion(int group, double ingestion) {
         this.V[group] += ingestion;
         this.ingested[group] += ingestion;
+
+
     }
 
     public void stepGutContent(int group, double dt, double T_w) {
@@ -114,5 +135,21 @@ public class SimpleFish {
     public double getMaxGutVolume(double weight) {
         // Burley and Vigg (1989):
         return 0.0007*Math.pow(weight, 1.3796);
+    }
+
+
+    /* Model for digestion dependent oxygen consumption */
+    public double calcDigestiveO2Cons(int group, double T_w) {
+        double digestRate = V[group]*a_1*Math.pow(T_w, a_2); // Digestion rate (g/s)
+        double maxO2ConsPerKgMin = 1.02; // mg (o2) / (kg (fish) * min), from regression model: 17 * 0.6 % BW
+        double refDigestedPerMin = 0.006 * weight[group] / (24.*60.); // g (feed) / min
+        double o2Cons = maxO2ConsPerKgMin / refDigestedPerMin; // mg (o2) / (kg (fish) * g (feed))
+
+        /*if (V[group] > 5) {
+            System.out.println("test");
+        }*/
+        //return o2Cons * digestRate;
+
+        return digestRate * 245.; // Forsberg: 245 mg O2 per g feed
     }
 }

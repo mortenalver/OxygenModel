@@ -6,11 +6,10 @@ import ucar.nc2.NetcdfFile;
 import ucar.nc2.Variable;
 
 import java.io.IOException;
-import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Random;
 
-public class InputDataNetcdf {
+public class InputDataLoenngrunnen {
 
     private Date[] times;
     private Long[] ltime;
@@ -31,16 +30,16 @@ public class InputDataNetcdf {
     private double[] addTemperatureOffsets = new double[] {0, 0, 0};
 
     private boolean multipleLayers = false; // Set to true if the NetCDF file gives full current profiles
-    public InputDataNetcdf(String filepath, boolean useInstantaneousAmbientVals) {
+    public InputDataLoenngrunnen(String filepath) {
 
         try {
             NetcdfFile ncfile = NetcdfFile.open(filepath);
             Variable time = ncfile.findVariable("time");
             Variable spd = ncfile.findVariable("extCurrentSpeed");
             Variable direction = ncfile.findVariable("extCurrentDir");
-            Variable o2amb5 = ncfile.findVariable(useInstantaneousAmbientVals ? "O2ambient_5" : "O2constAmbient_5");
-            Variable o2amb10 = ncfile.findVariable(useInstantaneousAmbientVals ? "O2ambient_10" : "O2constAmbient_10");
-            Variable o2amb15 = ncfile.findVariable(useInstantaneousAmbientVals ? "O2ambient_15" : "O2constAmbient_15");
+            Variable o2amb5 = ncfile.findVariable("O2ambient_5");
+            Variable o2amb10 = ncfile.findVariable("O2ambient_10");
+            Variable o2amb15 = ncfile.findVariable("O2ambient_15");
             //Variable feedingBitfield = ncfile.findVariable("feedingBitfield");
             Variable temp5 = ncfile.findVariable("temperature_5");
             Variable temp10 = ncfile.findVariable("temperature_10");
@@ -72,6 +71,7 @@ public class InputDataNetcdf {
                 currentDepths = new double[zc.getShape(0)];
                 for (int i=0; i<currentDepths.length; i++) {
                     currentDepths[i] = zcAD.get(i);
+                    //System.out.println(i+": "+currentDepths[i]);
                 }
             } else {
                 csdata = (ArrayDouble.D1) spd.read(new int[]{0}, shape);
@@ -149,7 +149,7 @@ public class InputDataNetcdf {
         System.out.println("StartTime: "+startTime.toString());
         System.out.println();
         while (((piv++) < (ltime.length-1)) && (ltime[piv+1]<sTime));
-        //System.out.println("piv = "+piv);
+        System.out.println("piv = "+piv);
 
         computeCurrentWithNoise();
         System.out.println(ltime[piv]);
@@ -163,8 +163,10 @@ public class InputDataNetcdf {
         if (piv == ltime.length-2)
             System.out.println("No more observation data available!");
 
-        if (piv > oldPiv)
+        if (piv > oldPiv) {
             computeCurrentWithNoise();
+            //System.out.println("Next data time: "+piv);
+        }
 
         return (piv > oldPiv);
     }
