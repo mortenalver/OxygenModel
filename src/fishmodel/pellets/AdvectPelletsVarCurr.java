@@ -106,11 +106,6 @@ public class AdvectPelletsVarCurr {
                             newValues[i][j][k] = pConc[i][j][k] + dt*(advect[i][j][k] + diffus[i][j][k]);
                             postSum += newValues[i][j][k];
 
-                            /*if (newValues[i][j][k] < 0) {
-                                System.out.println("negative result: i="+i+", j="+j+", k="+k);
-                                System.out.println("counter = "+counter);
-                                System.out.println("stop");
-                            }*/
 
                             if (countCell) {
                                 postNot += newValues[i][j][k];
@@ -372,6 +367,11 @@ public class AdvectPelletsVarCurr {
                                 + balancingSuperbeeAdv(dt, dxy, y_nb[0], y_nb[1], c_h, y_nb[2], y_nb[3], current[1][0], current[1][1])
                                 + balancingSuperbeeAdv(dt, dz, z_nb[0], z_nb[1], c_h, z_nb[2], z_nb[3], current[2][0], current[2][1]);
 
+                        /*if (Math.abs(advect[i][j][k]) > 1000.) {
+                            System.out.println("large result: i="+i+", j="+j+", k="+k+", value="+advect[i][j][k]);
+                            System.out.println("counter = "+counter);
+                            System.out.println("stop");
+                        }*/
                     } else {
                         /*// Ser ut til å fungere for uniformt strømfelt, gir ganske like resultat som superbee
                         advect[i][j][k] = (1 / dxy) *

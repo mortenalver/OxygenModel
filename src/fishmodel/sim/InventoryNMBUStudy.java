@@ -41,6 +41,8 @@ public class InventoryNMBUStudy {
 
             // Get shape of count variable:
             int[] cShape = count.getShape();
+            /*for (int i=0; i<cShape.length; i++)
+                System.out.println("Shape["+i+"]="+cShape[i]);*/
             countVal = new double[cShape[1]];
             weightVal = new double[cShape[1]];
             feedVal = new double[cShape[1]];

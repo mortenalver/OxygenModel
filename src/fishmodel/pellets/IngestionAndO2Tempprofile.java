@@ -14,6 +14,7 @@ public class IngestionAndO2Tempprofile {
 
 
     public static double o2consumptionMult = 1.2*1.3; // This factor can be used to globally multiply the o2 consumption of the fish.
+    public static double o2consumptionMultNew = 1.0;
 
     static double U = 1; // Swimming speed (body lengths/s)
 
@@ -39,7 +40,7 @@ public class IngestionAndO2Tempprofile {
     public static double[] calculateIngestion(double dt, double[][][] feed, double[][][] o2, double[][][] affinity, double[][][] o2Affinity, double o2AffSum,
                                               int availableCellsForO2Uptake,
                                               double[][][] ingDist, double[][][] o2ConsDist, double dxy, double dz, boolean[][][] mask, double pelletWeight,
-                                              double[] T_w, SimpleFish fish, double o2Cons_perturb) {
+                                              double[] T_w, SimpleFish fish, double o2Cons_perturb, boolean useNewConsumptionModel) {
         double N = fish.getTotalN();
         double WtotKg = 0.001*fish.getTotalW();
         if (N == 0)
@@ -189,8 +190,15 @@ public class IngestionAndO2Tempprofile {
                         double consHere = 0;
                         for (int kg=0; kg< fish.getNGroups(); kg++) {
 
-                            double o2ConsumptionGandS = o2consumptionMult*fish.getN(kg)*0.001*fish.getW(kg)*61.6*Math.pow(fish.getW(kg)
+                            double o2ConsumptionGandS;
+                            if (!useNewConsumptionModel)
+                                o2ConsumptionGandS = o2consumptionMult*fish.getN(kg)*0.001*fish.getW(kg)*61.6*Math.pow(fish.getW(kg)
                                     *0.001, -0.33)*Math.pow(1.03, T_w[k])*Math.pow(1.79, U)/3600.0;
+                            else
+                                // Orig submitted: 93.9*W^-0.13*1.03.^T*1.56.^U
+                                // Final version: 79.7*W^-0.14*1.04^T*1.64^U
+                                o2ConsumptionGandS = o2consumptionMultNew*fish.getN(kg)*0.001*fish.getW(kg)*79.7*Math.pow(fish.getW(kg)
+                                        *0.001, -0.14)*Math.pow(1.04, T_w[k])*Math.pow(1.64, U)/3600.0;
 
                             if (addDigestiveO2Cons) {
                                 // Get rate of O2 consumption from digestion in g/s per individual. Multiply by N:

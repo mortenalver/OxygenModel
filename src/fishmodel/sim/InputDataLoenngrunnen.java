@@ -71,6 +71,7 @@ public class InputDataLoenngrunnen {
                 currentDepths = new double[zc.getShape(0)];
                 for (int i=0; i<currentDepths.length; i++) {
                     currentDepths[i] = zcAD.get(i);
+                    //System.out.println(i+": "+currentDepths[i]);
                 }
             } else {
                 csdata = (ArrayDouble.D1) spd.read(new int[]{0}, shape);
@@ -164,7 +165,7 @@ public class InputDataLoenngrunnen {
 
         if (piv > oldPiv) {
             computeCurrentWithNoise();
-            System.out.println("Next data time: "+piv);
+            //System.out.println("Next data time: "+piv);
         }
 
         return (piv > oldPiv);

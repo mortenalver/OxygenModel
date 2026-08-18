@@ -785,7 +785,7 @@ public class SensorPosSimulationNMBU {
                     int[][] ranges = MultiCageUtils.getRanges(cagePositions.get(ii), dxy, rad);
 
                     double[] res = IngestionAndO2Subgrid.calculateIngestion(dt, fc, o2, affinity, o2Affinity,
-                            o2AffSums[ii], ranges, ingDist, o2consDist, dxy, dz, mask, pelletWeight, ambientTemp, fish[ii], 0);
+                            o2AffSums[ii], ranges, ingDist, o2consDist, dxy, dz, mask, pelletWeight, ambientTemp, fish[ii], 0, false);
                     totalIntake += res[0];
                     rho += res[1];
                     o2ConsumptionRate += res[2];

@@ -631,7 +631,7 @@ public class RunSimulations {
 
                 double[] res = IngestionAndO2Tempprofile.calculateIngestion(dt, fc, o2, affinity, o2Affinity, o2AffSum,
                         availableCellsForO2Uptake, ingDist, o2consDist, dxy, dz, mask, pelletWeight, ambientTemp, fish,
-                        o2Cons_perturb_r);
+                        o2Cons_perturb_r, false);
                 double totalIntake = res[0], rho = res[1], o2ConsumptionRate = res[2];
 
 

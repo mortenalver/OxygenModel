@@ -49,18 +49,21 @@ public class RunSimulationProhavOcean {
         // Modelloppløsning:
         double dxy = 3, dz = 3; // Model resolution (m)
 
+        // Ny eller gammel o2-cons-modell:
+        boolean useNewConsumptionModel = true;
+
         // Nedsenket og hvor mye:
-        double cageSubmergeM = 0.*20;
+        double cageSubmergeM = 20;
         boolean cageSubmerged = cageSubmergeM>0; // True if cage is submerged, false otherwise
 
         // Fish density:
-        double kgPerM3 = 15;
+        double kgPerM3 = 25;
 
         String resStr = String.valueOf(dxy);
 
         // Save files:
         String saveDir = "./output/";
-        String simNamePrefix = "anim_"+((int)kgPerM3)+"kg_"+resStr+"m"+(cageSubmerged ? "_subm" : "");
+        String simNamePrefix = "NoRenna3_"+((int)kgPerM3)+"kg_"+resStr+"m"+(cageSubmerged ? "_subm" : "");
         String simNamePostfix = "";
 
         boolean doMPI = false; // Will be set to true if we are running is EnKF mode using MPI
@@ -106,11 +109,12 @@ public class RunSimulationProhavOcean {
             cmf = new CurrentMagicFields("C:/Users/alver/OneDrive - NTNU/prosjekt/PROHAV/matlab/currents_heuristic_10deg.nc");
         }
 
+
         boolean includeHypoxiaAvoidance = true;
         int checkAvoidanceInterval = 30, checkAvoidanceCount = 0;
 
-        int year = 2021, month = Calendar.SEPTEMBER, day = 1;
-        int nSim = 1; // Number of days to simulate (separate sims)
+        int year = 2024, month = Calendar.JULY, day = 1;
+        int nSim = 31+31+30; // Number of days to simulate (separate sims)
 
         // If we are not running in MPI mode, we check the first argument whether it indicates a number of
         // days to add to the start date (if we are running in MPI mode the arguments actually contain
@@ -133,7 +137,7 @@ public class RunSimulationProhavOcean {
         int initYear = year, initMonth = month, initDate = day, initHour = 0, initMin = 0, initSec = 0;
         double t_end = 24*3600;//1*24*3600; // Duration of simulation
 
-        int startAt = 0; // Set to >0 to skip one or more simulations, but count them in the sim numbering
+        int startAt = 38; // Set to >0 to skip one or more simulations, but count them in the sim numbering
 
         // Domain settings and farm layout:
         int [] cageGrid=null;
@@ -142,7 +146,7 @@ public class RunSimulationProhavOcean {
         double farmRotation = 0; // Current directions should be rotated by -1 times this angle
         int[] feedStartEnd = new int[] {8*3600, 17*3600};
 
-        double[] unitSizeM = new double[] {210, 60, 60}; // Length, width and depth of cage
+        double[] unitSizeM = new double[] {187, 45, 45}; // Length, width and depth of cage
         cageGrid = new int[] {1, 1};
         cagePos = new int[][] {{0, 0}};
         farmRotation = -25+0*90; // Current directions should be rotated by -1 times this angle
@@ -169,13 +173,13 @@ public class RunSimulationProhavOcean {
 
 
         double dt = .5 * dxy; // Time step (s)
-        int storeIntervalFeed = 600/*7200*/, storeIntervalInfo = 60;
+        int storeIntervalFeed = 7200, storeIntervalInfo = 60;
         boolean storeO2Histograms = true;
 
         System.out.println("Resolution: "+dxy+" , "+dz);
 
 
-        double fishMaxDepth = 60;//38; // The maximum depth of the fish under non-feeding condition
+        double fishMaxDepth = 45;//38; // The maximum depth of the fish under non-feeding condition
 
         double currentReductionFactor = 0.8; // Multiplier for inside current as function of outside
 
@@ -230,13 +234,13 @@ public class RunSimulationProhavOcean {
         }*/
 
         // Feeding positions (underwater:
-        double[][] posFromCenterM = new double[][] {{-10, -10}, {-10, 10}, {10, -10}, {10, 10},
-                {-30, -10}, {-30, 10}, {30, -10}, {30, 10},
-                {-50, -10}, {-50, 10}, {50, -10}, {50, 10},
-                {-70, -10}, {-70, 10}, {70, -10}, {70, 10},
-                {-90, -10}, {-90, 10}, {90, -10}, {90, 10}};
-        double xScale = 0.9;
-        double[] feedDepth = new double[] { 7, 19 }; // According to OF1 report, feeding depth at 6-7 m
+        double xst = 15, yst = 15; // Distances between feeding points
+        double[][] posFromCenterM = new double[][] {{-0.5*xst, -0.5*yst}, {-0.5*xst, 0.5*yst}, {0.5*xst, -0.5*yst}, {0.5*xst, 0.5*yst},
+                {-1.5*xst, -0.5*yst}, {-1.5*xst, 0.5*yst}, {1.5*xst, -0.5*yst}, {1.5*xst, 0.5*yst},
+                {-2.5*xst, -0.5*yst}, {-2.5*xst, 0.5*yst}, {2.5*xst, -0.5*yst}, {2.5*xst, 0.5*yst},
+                {-3.5*xst, -0.5*yst}, {-3.5*xst, 0.5*yst}, {3.5*xst, -0.5*yst}, {3.5*xst, 0.5*yst}};
+        double xScale = 1.0;
+        double[] feedDepth = new double[] { 5, 15 }; // According to OF1 report, feeding depth at 6-7 m
         int nFeedPos = feedDepth.length*posFromCenterM.length;
         double divis = (double)(nFeedPos);
         int[][] feedingPos = new int[nFeedPos][3];
@@ -402,7 +406,7 @@ public class RunSimulationProhavOcean {
             System.out.println("Unit string: "+unitString);
 
             // Initialize environmental input data:
-            String inDataFileName = "SINMOD_data.nc";
+            String inDataFileName = cageSubmerged ? "NoRenna_subm_v3.nc" : "NoRenna_surf_v3.nc";
             String inDataFile = "C:/Users/alver/OneDrive - NTNU/prosjekt/PROHAV/SINMOD-data/"+inDataFileName;
             if (!(new File(inDataFile)).exists())
                 inDataFile = inDataFileName;
@@ -410,8 +414,10 @@ public class RunSimulationProhavOcean {
             inData.setStartTime(startTime);
 
             double volume = unitSizeM[0]*unitSizeM[1]*unitSizeM[2];
+            System.out.println("Volume: "+volume);
             double totBiomassG = kgPerM3*1000*volume;
-            double meanWeightG = 5000;
+            System.out.println("Tot biomass: "+totBiomassG);
+            double meanWeightG = 4000;
             System.out.println("N fish: "+totBiomassG/meanWeightG);
             SimpleFish fish = new SimpleFish(totBiomassG/meanWeightG, meanWeightG, 0.1*meanWeightG);
 
@@ -733,7 +739,7 @@ public class RunSimulationProhavOcean {
 
                 double[] res = IngestionAndO2Tempprofile.calculateIngestion(dt, fc, o2, affinity, o2Affinity,
                         o2AffSum, availableCellsForO2Uptake, ingDist, o2consDist, dxy, dz, mask, pelletWeight,
-                        ambientTemp, fish, 0);
+                        ambientTemp, fish, 0, useNewConsumptionModel);
                 totalIntake += res[0];
                 rho += res[1];
                 o2ConsumptionRate += res[2];

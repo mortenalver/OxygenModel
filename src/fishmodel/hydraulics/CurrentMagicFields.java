@@ -41,8 +41,8 @@ public class CurrentMagicFields {
                 thetas[i] = thetasD.get(i);
             d_theta = thetas[1]-thetas[0];
 
-            for (int i=0; i<angShape[0]; i++)
-                System.out.println(thetas[i]);
+            //for (int i=0; i<angShape[0]; i++)
+            //    System.out.println(thetas[i]);
 
             cfieldsU = new double[shape[1]][shape[2]][shape[0]];
             cfieldsV = new double[shape[1]][shape[2]][shape[0]];
@@ -53,7 +53,8 @@ public class CurrentMagicFields {
                     for (int j = 0; j < shape[2]; j++) {
                         cfieldsU[i][j][k] = valueU.get(0, i, j);
                         cfieldsV[i][j][k] = valueV.get(0, i, j);
-                        //System.out.print(cfields[i][j][0] + " ");
+                        /*if (i==6 && j==4)
+                            System.out.println(cfieldsU[i][j][k] + " " + cfieldsV[i][j][k]);*/
                     }
                     //System.out.println("");
                 }
@@ -63,7 +64,7 @@ public class CurrentMagicFields {
 
             ncfile.close();
 
-            double angle;
+            /*double angle;
             angle = 0; System.out.println("angle: "+angle+", index: "+chooseField(angle));
             angle = 5; System.out.println("angle: "+angle+", index: "+chooseField(angle));
             angle = 105; System.out.println("angle: "+angle+", index: "+chooseField(angle));
@@ -71,6 +72,8 @@ public class CurrentMagicFields {
             angle = -1; System.out.println("angle: "+angle+", index: "+chooseField(angle));
             angle = 359; System.out.println("angle: "+angle+", index: "+chooseField(angle));
             angle = -11; System.out.println("angle: "+angle+", index: "+chooseField(angle));
+            */
+
             /*
             double[][][][] test = new double[shape[1]][shape[2]][3][3];
             double[] directions = new double[] {135, 45, 270};
@@ -117,21 +120,31 @@ public class CurrentMagicFields {
      * @param angles
      */
     public void setCurrentField(double[][][][] field, double[] speeds, double[] angles) {
+        double minSetU = Double.MAX_VALUE, maxSetU = Double.MIN_VALUE;
+        double minSetV = Double.MAX_VALUE, maxSetV = Double.MIN_VALUE;
         for (int k=0; k<angles.length; k++) {
             int fieldI = chooseField(angles[k]);
+            //System.out.println("k="+k+", angle="+angles[k]+", speed="+speeds[k]+", fieldI="+fieldI);
             for (int i=0; i<field.length; i++)
                 for (int j=0; j<field[i].length; j++) {
                     //System.out.println("i="+i+", j="+j+", fieldI="+fieldI+", field.length="+field.length);
                     field[i][j][k][0] = speeds[k]*cfieldsU[i][j][fieldI];
                     field[i][j][k][1] = speeds[k]*cfieldsV[i][j][fieldI];
+                    if (field[i][j][k][0] > maxSetU) maxSetU = field[i][j][k][0];
+                    if (field[i][j][k][0] < minSetU) minSetU = field[i][j][k][0];
+                    if (field[i][j][k][1] > maxSetV) maxSetV = field[i][j][k][1];
+                    if (field[i][j][k][1] < minSetV) minSetV = field[i][j][k][1];
+
                     //field[i][j][k][0] = cfieldsU[i][j][fieldI];
                     //field[i][j][k][1] = cfieldsV[i][j][fieldI];
                     /*if (i==5 && j==15) {
-                        System.out.println(field[i][j][k][0] + " / "+field[i][j][k][1]);
+                        System.out.println(field[i][j][k][0] + " / "+field[i][j][k][1]+". cfield="+cfieldsU[i][j][fieldI]);
                         System.out.println();
                     }*/
                 }
         }
+
+        //System.out.println("U vals: ["+minSetU+" - "+maxSetU+"]. V: ["+minSetV+" - "+maxSetV+"]");
     }
 
     /**

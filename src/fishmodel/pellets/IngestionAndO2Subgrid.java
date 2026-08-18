@@ -14,8 +14,11 @@ public class IngestionAndO2Subgrid {
         b = 0.4, // Exponent for confusion factor
         c = 0.5; // Exponent for f_d factor
 
+    // This factor can be used to globally multiply the o2 consumption of the fish when using the Grøttum & Sigholt model:
+    public static double o2consumptionMultOld = 1.2*1.3;
 
-    public static double o2consumptionMult = 1.2*1.3; // This factor can be used to globally multiply the o2 consumption of the fish.
+    // This factor can be used to globally multiply the o2 consumption of the fish when using the new o2 consumption model:
+    public static double o2consumptionMultNew = 1.0;
 
     private static boolean addDigestiveO2Cons = false;
 
@@ -33,6 +36,8 @@ public class IngestionAndO2Subgrid {
         IngestionAndO2Subgrid.addDigestiveO2Cons = value;
     }
 
+    public static void setO2EvenFraction(double value) { IngestionAndO2Subgrid.o2_even_fraction = value; }
+
     // O2 consumption (Grøttum and Sigholt, 1998):
     //    VO2 (mg/kg/h) = 61.6 * BW^0.33 * 1.03^T * 1.79^U
     // BW: body weight (kg)
@@ -42,7 +47,7 @@ public class IngestionAndO2Subgrid {
     public static double[] calculateIngestion(double dt, double[][][] feed, double[][][] o2, double[][][] affinity, double[][][] o2Affinity, double o2AffSum,
                                               int[][] ranges,
                                               double[][][] ingDist, double[][][] o2ConsDist, double dxy, double dz, boolean[][][] mask, double pelletWeight,
-                                              double[] T_w, SimpleFish fish, double o2Cons_perturb) {
+                                              double[] T_w, SimpleFish fish, double o2Cons_perturb, boolean useNewConsumptionModel) {
         double N = fish.getTotalN();
         double WtotKg = 0.001*fish.getTotalW();
         //System.out.println("N="+N+" / totW="+WtotKg);
@@ -144,7 +149,7 @@ public class IngestionAndO2Subgrid {
                         // Remove same relative fraction of feed everywhere:
                         cellIng[i][j][k] = affinity[i][j][k] * totalIntake * feed[i][j][k] / totalFeed;
                         sumCellIng += cellIng[i][j][k];
-
+                        //System.out.println(affinity[i][j][k]);
                     }
             correction = sumCellIng > 0 ? totalIntake / sumCellIng : 0;
             //System.out.println("Correction: "+correction);
@@ -212,8 +217,19 @@ public class IngestionAndO2Subgrid {
                             //consHere += o2consumptionMult*(1.0 + o2Cons_perturb)*fish.getN(kg)*0.001*fish.getW(kg)*61.6*Math.pow(fish.getW(kg)
                             //        *0.001, -0.33)*Math.pow(1.03, T_w[k])*Math.pow(1.79, U)/3600.0;
 
-                            double o2ConsumptionGandS = o2consumptionMult*fish.getN(kg)*0.001*fish.getW(kg)*61.6*Math.pow(fish.getW(kg)
-                                    *0.001, -0.33)*Math.pow(1.03, T_w[k])*Math.pow(1.79, U)/3600.0;
+                            double o2ConsumptionGandS = 0;
+
+                            if (!useNewConsumptionModel) {
+                                // Grøttum and Sigholt:
+                                o2ConsumptionGandS = o2consumptionMultOld*fish.getN(kg)*0.001*fish.getW(kg)*61.6*Math.pow(fish.getW(kg)
+                                        *0.001, -0.33)*Math.pow(1.03, T_w[k])*Math.pow(1.79, U)/3600.0;
+                            } else {
+
+                                // Orig submitted: 93.9*W^-0.13*1.03.^T*1.56.^U
+                                // Final version: 79.7*W^-0.14*1.04^T*1.64^U
+                                o2ConsumptionGandS = o2consumptionMultNew*fish.getN(kg)*0.001*fish.getW(kg)*79.7*Math.pow(fish.getW(kg)
+                                        *0.001, -0.14)*Math.pow(1.04, T_w[k])*Math.pow(1.64, U)/3600.0;
+                            }
 
                             if (addDigestiveO2Cons) {
                                 // Get rate of O2 consumption from digestion in g/s per individual. Multiply by N:
