@@ -66,7 +66,11 @@ public class CageMasking {
                 }
                 if (maskBottom)
                     mask[i][j][dims[2]-1] = false;
-                else mask[i][j][dims[2]-1] = inside;
+                else {
+                    double depth = ((double)(dims[2]-1)+0.5)*dz;
+                    if ((depth >= cageSubmergeM) && (depth <= (unitSizeM[2]+cageSubmergeM)))
+                        mask[i][j][dims[2]-1] = inside;
+                }
             }
 
         return mask;

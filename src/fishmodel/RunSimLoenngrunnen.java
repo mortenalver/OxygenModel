@@ -58,24 +58,51 @@ public class RunSimLoenngrunnen {
         boolean useCurrentMagic = false; // Use spatially variable current flow field
 
         boolean useNewConsumptionModel = true; // Use updated O2 model (PROHAV HI submitted 2025)
-        boolean useDigestiveModel = true; // Take digestion activity into account when computing O2 consumption
+        boolean useDigestiveModel = false; // Take digestion activity into account when computing O2 consumption
         double o2EvenFraction = 0.75; //0.9; //0.75; // Fraction of fish not following the feed distribution during feeding
+        double extraConsumptionMultiplier = 1.0; // Can be set != 1 to apply an extra multiplier for o2 consumption.
 
-        double currentReductionFactor = 0.55; //0.8; // Normal value //0.65; // 0.8; // Multiplier for inside current as function of outside
-        if (useCurrentMagic) currentReductionFactor = 0.9;
+        double meanRefByMeanMid = 2.2008;// At 5 m
+        double meanNf160ByMeanMid = 1.9751; // At 5 m
 
-        // TEST TEST TEST TEST TEST
-        IngestionAndO2Subgrid.o2consumptionMultNew *= 0.80;
+        double currentReductionFactor = 0.8;///meanRefByMeanMid; //0.8; // Normal value //0.65; // 0.8; // Multiplier for inside current as function of outside
+        if (useCurrentMagic) currentReductionFactor = 1.0;//0.9;
 
         // Flags for special test cases:
         boolean testEastCurrAgainstFluent = false; // If true, ignore inventory file and use set biomass and feeding in all cages
         boolean cage6BiomassOnly = false; // If true, let there be biomass only in cage 6 (index 5)
         boolean dynamicCurrReductionFactor = false; // If true, reduction factor goes to 1 at low current speeds
 
+        // Number of simulations and start day:
+        int nSim = 49; // Number of days to simulate (separate sims)
+        int startAt = 0; // Set to >0 to skip one or more simulations, but count them in the sim numbering
+
+        // ----------------------------------------------------------------------------------------------------------
+        // Choice of input data and prefix:
+
+        String inputPrefix = "mid_1.4cons";
+        String inDataFileName = "loenngrunnen_data_mid_fix.nc"; // Currents from mid sensor
+        extraConsumptionMultiplier *= 1.4;
+        currentReductionFactor = 1.05;
+
+        /*String inputPrefix = "ref";
+        String inDataFileName = "loenngrunnen_data_ref_fix.nc"; // Current directions from ref and speeds from mid
+        currentReductionFactor /= meanRefByMeanMid;
+        startAt = 16;*/
+
+        //String inputPrefix = "nf160_cred3";
+        //String inDataFileName = "loenngrunnen_data_nf160.nc"; // Currents from Norfjords 160
+        //currentReductionFactor /= meanNf160ByMeanMid;
+
+        // ----------------------------------------------------------------------------------------------------------
+
+
         // Save files:
-        String saveDir = "./output_LOENN/";
-        String simNamePrefix = "dig_lowcurr_lowcons2_"+(useCurrentMagic ? "" : "nomag_")+resStr+"m"; //"ff_3m_curr0.7_";
+        String saveDir = "./output/";
+        String simNamePrefix = inputPrefix+"_"+(useCurrentMagic ? "mag_" : "nomag_")+resStr+"m"; //"ff_3m_curr0.7_";
         String simNamePostfix = "";
+
+
 
         boolean doMPI = false; // Will be set to true if we are running is EnKF mode using MPI
         AssimSettings as = new AssimSettings(); // Settings related to the EnKF are gathered in AssimSettings
@@ -130,9 +157,7 @@ public class RunSimLoenngrunnen {
         int checkAvoidanceInterval = 30, checkAvoidanceCount = 0;
 
         // Valid simulation period is May 21 to July 8 (inclusive)
-        //int year = 2025, month = Calendar.MAY, day = 21;
-        int year = 2025, month = Calendar.JUNE, day = 10;
-        int nSim = 1;//49; // Number of days to simulate (separate sims)
+        int year = 2025, month = Calendar.MAY, day = 21;
 
         // If we are not running in MPI mode, we check the first argument whether it indicates a number of
         // days to add to the start date (if we are running in MPI mode the arguments actually contain
@@ -155,8 +180,8 @@ public class RunSimLoenngrunnen {
         int initYear = year, initMonth = month, initDate = day, initHour = 0, initMin = 0, initSec = 0;
         double t_end = 24*3600;//1*24*3600; // Duration of simulation
 
-        int startAt = 0; // Set to >0 to skip one or more simulations, but count them in the sim numbering
 
+        
         // Domain settings and farm layout:
         int [] cageGrid=null;
         int[][] cagePos=null;
@@ -222,7 +247,7 @@ public class RunSimLoenngrunnen {
 
 
         // Oxygen diffusion constant. To be set dependent on current speed.
-        double diffKappaO2 = 0.1, diffKappaO2Z = 0.1;
+        double diffKappaO2, diffKappaO2Z;
 
         int[] cageDims = new int[3];
         double[] currentOffset = new double[] {0,0,0};
@@ -420,15 +445,6 @@ public class RunSimLoenngrunnen {
             System.out.println("Unit string: "+unitString);
 
             // Initialize environmental input data:
-            //String inDataFileName = "loenngrunnen_data_test.nc";
-            String inDataFileName = "bla2_loenngrunnen_data_mid.nc"; // Currents from mid sensor
-            //String inDataFileName = "loenngrunnen_data_nk800.nc"; // Currents from Norkyst800
-            //String inDataFileName = "loenngrunnen_data_nk800_rotated.nc"; // Currents from Norkyst800
-            //String inDataFileName = "loenngrunnen_data_nf160.nc"; // Currents from Norfjords 160
-            //String inDataFileName = "loenngrunnen_data_lowpass.nc"; // Lowpass filtered currents from mid sensor
-            //String inDataFileName = "bla_loenngrunnen_data_ref.nc";
-            //String inDataFileName = "loenngrunnen_data_hybrid.nc";
-            //String inDataFileName = "loenngrunnen_data_noadj.nc"; // Version where ext values are not set to the highest sensor value
             String inDataFile = "C:/Users/alver/OneDrive - NTNU/prosjekt/PROHAV/feltstudie/"+inDataFileName;
             InputDataLoenngrunnen inData = null;
             if (useFieldInputs) {
@@ -516,6 +532,16 @@ public class RunSimLoenngrunnen {
                     fish[i].setAllV(initV);*/
             }
             // -----------------------------------------------------------
+
+
+            // -----------------------------------------------------------
+            // Apply extra multiplier for o2 consumption:
+            if (useNewConsumptionModel)
+                IngestionAndO2Subgrid.o2consumptionMultNew = IngestionAndO2Subgrid.o2consumptionMultNew_orig*extraConsumptionMultiplier;
+            else
+                IngestionAndO2Subgrid.o2consumptionMultOld = IngestionAndO2Subgrid.o2consumptionMultOld_orig*extraConsumptionMultiplier;
+            // -----------------------------------------------------------
+
 
             // Determine nominal feeding rate:
             double nominalFeedingRate = 0;//cagePositions.size()*2900.*1000/(10*3600); // Approximate feeding over 10 hours based on FishTalk data
@@ -607,7 +633,7 @@ public class RunSimLoenngrunnen {
 
                         double[] obsCurrentDepths = inData.getCurrentDepths();
                         /*for (int j = 0; j < obsCurrentDepths.length; j++) {
-                            System.out.println("Obse depth layer "+j+": "+obsCurrentDepths[j]);
+                            System.out.println("Obs depth layer "+j+": "+obsCurrentDepths[j]);
                         }*/
 
                         double[] tempVal = new double[]{ inData.getTemperature5(), inData.getTemperature10(), inData.getTemperature15()};
@@ -709,8 +735,8 @@ public class RunSimLoenngrunnen {
                 }
 
                 diffKappaO2 = 0.023;//Math.min(0.5, 10*Math.pow(currentReductionFactor*0.06,2)); // Math.min(0.5, 10*Math.pow(currentReductionFactor*0.04,2));
-                //diffKappaO2 *= 1.5; // TEST TEST TEST TEST TEST
                 diffKappaO2Z = diffKappaO2; // TEST TEST TEST TEST TEST //0.5*diffKappaO2;
+                //diffKappaO2 *= 2; // TEST TEST TEST TEST TEST
                 //System.out.println("DiffKappa O2: "+diffKappaO2);
 
                 // Update feeding rate depending on preset feeding periods:

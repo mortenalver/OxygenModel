@@ -18,6 +18,7 @@ import org.apache.commons.math3.analysis.interpolation.LinearInterpolator;
 import org.apache.commons.math3.analysis.polynomials.PolynomialSplineFunction;
 import save.SaveNetCDF;
 import ucar.nc2.NetcdfFileWriteable;
+import visad.DelaunayWatson;
 
 import java.io.File;
 import java.io.IOException;
@@ -53,7 +54,7 @@ public class RunSimulationProhavOcean {
         boolean useNewConsumptionModel = true;
 
         // Nedsenket og hvor mye:
-        double cageSubmergeM = 20;
+        double cageSubmergeM = 0*20;
         boolean cageSubmerged = cageSubmergeM>0; // True if cage is submerged, false otherwise
 
         // Fish density:
@@ -61,9 +62,41 @@ public class RunSimulationProhavOcean {
 
         String resStr = String.valueOf(dxy);
 
+
+        int konseptNo = 2; // Konsept 1: rektangulært; konsept 2: sirkulært som OF1
+        int lokalitetNo = 1; // 1: NoRenna, 2: Froyabanken, 3: Tranabanken
+        String simNameLok="";
+        double farmRotation = 0; // Current directions should be rotated by -1 times this angle
+        int year = 2024,
+                month = Calendar.JULY,
+                day = 1,
+                nSim = 31+31+30; // Number of days to simulate (separate sims)
+
+        switch (lokalitetNo) {
+            case 1:
+                simNameLok = "NoRenna";
+                farmRotation = -25;
+                year = 2024;
+                break;
+            case 2:
+                simNameLok = "Froyabanken";
+                farmRotation = 30; // Main current direction north-northwest and south-southeast
+                year = 2023;
+                month = Calendar.AUGUST;
+                nSim = 31;
+                break;
+            case 3:
+                simNameLok = "Tranabanken";
+                farmRotation = -95; // Main current direction 95 degrees (a little south of easterly)
+                year = 2023;
+                month = Calendar.AUGUST;
+                nSim = 31;
+                break;
+        }
+
         // Save files:
         String saveDir = "./output/";
-        String simNamePrefix = "NoRenna3_"+((int)kgPerM3)+"kg_"+resStr+"m"+(cageSubmerged ? "_subm" : "");
+        String simNamePrefix = simNameLok+"_"+"k"+(konseptNo)+"_"+((int)kgPerM3)+"kg_"+resStr+"m"+(cageSubmerged ? "_subm" : "");
         String simNamePostfix = "";
 
         boolean doMPI = false; // Will be set to true if we are running is EnKF mode using MPI
@@ -106,15 +139,13 @@ public class RunSimulationProhavOcean {
         boolean useCurrentMagic = false; // Use spatially variable current flow field
         CurrentMagicFields cmf = null;
         if (useCurrentMagic) {
-            cmf = new CurrentMagicFields("C:/Users/alver/OneDrive - NTNU/prosjekt/PROHAV/matlab/currents_heuristic_10deg.nc");
+            cmf = new CurrentMagicFields("C:/Users/alver/OneDrive - NTNU/prosjekt/PROHAV/matlab/fluentOptim/lti_prohav_ocean.nc");
         }
 
 
         boolean includeHypoxiaAvoidance = true;
         int checkAvoidanceInterval = 30, checkAvoidanceCount = 0;
 
-        int year = 2024, month = Calendar.JULY, day = 1;
-        int nSim = 31+31+30; // Number of days to simulate (separate sims)
 
         // If we are not running in MPI mode, we check the first argument whether it indicates a number of
         // days to add to the start date (if we are running in MPI mode the arguments actually contain
@@ -137,26 +168,27 @@ public class RunSimulationProhavOcean {
         int initYear = year, initMonth = month, initDate = day, initHour = 0, initMin = 0, initSec = 0;
         double t_end = 24*3600;//1*24*3600; // Duration of simulation
 
-        int startAt = 38; // Set to >0 to skip one or more simulations, but count them in the sim numbering
+        int startAt = 0; // Set to >0 to skip one or more simulations, but count them in the sim numbering
 
         // Domain settings and farm layout:
         int [] cageGrid=null;
         int[][] cagePos=null;
         double outerPadding = 75; // Ekstra rom utenfor rammefortøyningene
-        double farmRotation = 0; // Current directions should be rotated by -1 times this angle
         int[] feedStartEnd = new int[] {8*3600, 17*3600};
 
-        double[] unitSizeM = new double[] {187, 45, 45}; // Length, width and depth of cage
-        cageGrid = new int[] {1, 1};
-        cagePos = new int[][] {{0, 0}};
-        farmRotation = -25+0*90; // Current directions should be rotated by -1 times this angle
-        // -25 is perpendicular to the main current direction. Add 90 to place the farm along that direction.
+        double[] unitSizeM;
 
-
-        // Sensor depths (all horizontal positions will be equipped with sensors at all depths:
-        double[] sensorDepths = new double[] {5, 10, 15};
-        // Angle positions of sensors at outer edge of each tank (0 degrees refers to north):
-        double[] sensorAngles = new double[] {128.2948, 2.8445, 246.8427};
+        if (konseptNo == 1) {
+            unitSizeM = new double[]{184, 46, 38}; // Length, width and depth of cage
+            cageGrid = new int[]{1, 1};
+            cagePos = new int[][]{{0, 0}};
+            // -25 is perpendicular to the main current direction. Add 90 to place the farm along that direction.
+        } else { // Konsept 2
+            unitSizeM = new double[] {110, 110, 38};
+            cageGrid = new int[]{1, 1};
+            cagePos = new int[][]{{0, 0}};
+            farmRotation = 0; // No neeed for rotation with circular cage
+        }
 
         double[] domainDims = new double[] {2*outerPadding + unitSizeM[0]*cageGrid[0],
                 2*outerPadding + unitSizeM[1]*cageGrid[1],
@@ -179,10 +211,13 @@ public class RunSimulationProhavOcean {
         System.out.println("Resolution: "+dxy+" , "+dz);
 
 
-        double fishMaxDepth = 45;//38; // The maximum depth of the fish under non-feeding condition
+        double fishMaxDepth = 70;//38; // The maximum depth of the fish under non-feeding condition
 
-        double currentReductionFactor = 0.8; // Multiplier for inside current as function of outside
-
+        double currentReductionFactor; // = 0.8;
+        if (konseptNo == 1)
+            currentReductionFactor = 0.899; // Based on average within rectangle from Fluent simulations. Multiplier for inside current as function of outside
+        else
+            currentReductionFactor = 0.899; // SJEKK
 
         // Environmental conditions:
         double currentSpeedInit = 2*0.04; // External current speed (m/s)
@@ -218,7 +253,11 @@ public class RunSimulationProhavOcean {
         cageDims[0] = (int)Math.ceil(domainDims[0]/dxy);
         cageDims[1] = (int)Math.ceil(domainDims[1]/dxy);
         cageDims[2] = (int)Math.ceil(domainDims[2]/dz)+1;
-        mask = CageMasking.rectangularMasking(cageDims, dxy, dz, unitSizeM, cageSubmergeM, false);
+        if (konseptNo == 1)
+            mask = CageMasking.rectangularMasking(cageDims, dxy, dz, unitSizeM, cageSubmergeM, false);
+        else
+            mask = CageMasking.circularMasking(cageDims, dxy, unitSizeM[0]/2.0, false);
+
         boolean useWalls = false;
 
         System.out.println("Domain dimensions: ("+cageDims[0]+", "+cageDims[1]+", "+cageDims[2]+")");
@@ -234,30 +273,53 @@ public class RunSimulationProhavOcean {
         }*/
 
         // Feeding positions (underwater:
-        double xst = 15, yst = 15; // Distances between feeding points
-        double[][] posFromCenterM = new double[][] {{-0.5*xst, -0.5*yst}, {-0.5*xst, 0.5*yst}, {0.5*xst, -0.5*yst}, {0.5*xst, 0.5*yst},
-                {-1.5*xst, -0.5*yst}, {-1.5*xst, 0.5*yst}, {1.5*xst, -0.5*yst}, {1.5*xst, 0.5*yst},
-                {-2.5*xst, -0.5*yst}, {-2.5*xst, 0.5*yst}, {2.5*xst, -0.5*yst}, {2.5*xst, 0.5*yst},
-                {-3.5*xst, -0.5*yst}, {-3.5*xst, 0.5*yst}, {3.5*xst, -0.5*yst}, {3.5*xst, 0.5*yst}};
-        double xScale = 1.0;
-        double[] feedDepth = new double[] { 5, 15 }; // According to OF1 report, feeding depth at 6-7 m
-        int nFeedPos = feedDepth.length*posFromCenterM.length;
-        double divis = (double)(nFeedPos);
-        int[][] feedingPos = new int[nFeedPos][3];
-        int piv = 0;
-        double[] pos = cagePositions.get(0);
-        int fpiv=0;
-        for (int vi=0; vi<feedDepth.length; vi++) {
-            int feedLayer = (int)Math.round((feedDepth[vi]+cageSubmergeM)/dz);
-            for (int j = 0; j < posFromCenterM.length; j++) {
-                double posX = pos[0] + xScale * posFromCenterM[j][0];
-                double posY = pos[1] + posFromCenterM[j][1];
-                feedingPos[fpiv][0] = (int) Math.round(posX / dxy);
-                feedingPos[fpiv][1] = (int) Math.round(posY / dxy);
-                feedingPos[fpiv][2] = feedLayer;
-                fpiv+=1;
+        int nFeedPos;
+        int[][] feedingPos;
+        if (konseptNo == 1) {
+            double xst = 15, yst = 15; // Distances between feeding points
+            double[][] posFromCenterM = new double[][]{{-0.5 * xst, -0.5 * yst}, {-0.5 * xst, 0.5 * yst}, {0.5 * xst, -0.5 * yst}, {0.5 * xst, 0.5 * yst},
+                    {-1.5 * xst, -0.5 * yst}, {-1.5 * xst, 0.5 * yst}, {1.5 * xst, -0.5 * yst}, {1.5 * xst, 0.5 * yst},
+                    {-2.5 * xst, -0.5 * yst}, {-2.5 * xst, 0.5 * yst}, {2.5 * xst, -0.5 * yst}, {2.5 * xst, 0.5 * yst},
+                    {-3.5 * xst, -0.5 * yst}, {-3.5 * xst, 0.5 * yst}, {3.5 * xst, -0.5 * yst}, {3.5 * xst, 0.5 * yst}};
+            double xScale = 1.0;
+            double[] feedDepth = new double[]{5, 15}; // According to OF1 report, feeding depth at 6-7 m
+            nFeedPos = feedDepth.length * posFromCenterM.length;
+            feedingPos = new int[nFeedPos][3];
+            int piv = 0;
+            double[] pos = cagePositions.get(0);
+            int fpiv = 0;
+            for (int vi = 0; vi < feedDepth.length; vi++) {
+                int feedLayer = (int) Math.round((feedDepth[vi] + cageSubmergeM) / dz);
+                for (int j = 0; j < posFromCenterM.length; j++) {
+                    double posX = pos[0] + xScale * posFromCenterM[j][0];
+                    double posY = pos[1] + posFromCenterM[j][1];
+                    feedingPos[fpiv][0] = (int) Math.round(posX / dxy);
+                    feedingPos[fpiv][1] = (int) Math.round(posY / dxy);
+                    feedingPos[fpiv][2] = feedLayer;
+                    fpiv += 1;
+                }
             }
+        } else { // Konsept 2
+            double[] posFromCenter = new double[] {19, 29, 38, 48};
+            double[] angles = new double[] {0, 90, 180, 270};
+            double feedingDepth = 6.5;
+            double[] pos = cagePositions.get(0);
+            int feedLayer = (int) Math.round((feedingDepth + cageSubmergeM) / dz);
+            nFeedPos = 16;
+            feedingPos = new int[nFeedPos][3];
+            int fpiv = 0;
+            for (int i=0; i<angles.length; i++)
+                for (int j=0; j<posFromCenter.length; j++) {
+                    double posX = pos[0] + posFromCenter[j]*Math.cos(angles[i]*Math.PI/180.);
+                    double posY = pos[1] + posFromCenter[j]*Math.sin(angles[i]*Math.PI/180.);
+                    feedingPos[fpiv][0] = (int) Math.round(posX / dxy);
+                    feedingPos[fpiv][1] = (int) Math.round(posY / dxy);
+                    feedingPos[fpiv][2] = feedLayer;
+                    fpiv += 1;
+                }
         }
+        double divis = (double) (nFeedPos);
+
         // Feeding periods (start/end in s):
         // Fra Eskil (Bjørøya): måltidene varte fra ca. kl. 07:30-17:30, i gjennomsnitt.
         int[][] feedingPeriods = new int[][] {{feedStartEnd[0], feedStartEnd[1]},
@@ -391,9 +453,12 @@ public class RunSimulationProhavOcean {
             hydro = SimpleTankHydraulics.getProfileHydraulicField(cageDims, currentProfile);
 
 
-            AdvectPellets ap = new AdvectPellets();
+            AdvectPelletsVarCurr ap = new AdvectPelletsVarCurr();
+            AdvectPelletsVarCurr apOx = new AdvectPelletsVarCurr();
 
-            AdvectPellets apOx = new AdvectPellets();
+            //AdvectPellets ap = new AdvectPellets();
+            //AdvectPellets apOx = new AdvectPellets();
+
             //AdvectPelletsVarCurr apOx_vc = new AdvectPelletsVarCurr();
             if (varyAmbient) {
                 apOx.setVaryAmbient(true, affinityProfile);
@@ -406,14 +471,20 @@ public class RunSimulationProhavOcean {
             System.out.println("Unit string: "+unitString);
 
             // Initialize environmental input data:
-            String inDataFileName = cageSubmerged ? "NoRenna_subm_v3.nc" : "NoRenna_surf_v3.nc";
+            //String inDataFileName = cageSubmerged ? "NoRenna_subm_v3.nc" : "NoRenna_surf_v3.nc";
+            String inDataFileName = cageSubmerged ? simNameLok+"_subm_upstream.nc" : simNameLok+"_surf_upstream.nc";
             String inDataFile = "C:/Users/alver/OneDrive - NTNU/prosjekt/PROHAV/SINMOD-data/"+inDataFileName;
             if (!(new File(inDataFile)).exists())
                 inDataFile = inDataFileName;
             InputDataNMBUStudy inData = new InputDataNMBUStudy(inDataFile);
             inData.setStartTime(startTime);
 
-            double volume = unitSizeM[0]*unitSizeM[1]*unitSizeM[2];
+            double volume;
+            if (konseptNo == 1) // Rektangulært
+                volume = unitSizeM[0]*unitSizeM[1]*unitSizeM[2];
+            else // Sirkulær sylinder
+                volume = Math.PI*Math.pow(0.5*unitSizeM[0],2.0)*unitSizeM[2];
+
             System.out.println("Volume: "+volume);
             double totBiomassG = kgPerM3*1000*volume;
             System.out.println("Tot biomass: "+totBiomassG);

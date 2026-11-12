@@ -314,6 +314,7 @@ public class RunSimulations {
             if (decreasingCurrentFactor)
                 currentReductionFactor = 0.8 + 0.05 - ((double)sim)*(0.2/*0.25*//8.0);
 
+
             AdvectPellets ap = new AdvectPellets();
             AdvectPellets apOx = new AdvectPellets();
             if (varyAmbient) {

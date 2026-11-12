@@ -15,10 +15,12 @@ public class IngestionAndO2Subgrid {
         c = 0.5; // Exponent for f_d factor
 
     // This factor can be used to globally multiply the o2 consumption of the fish when using the Grøttum & Sigholt model:
-    public static double o2consumptionMultOld = 1.2*1.3;
+    public static final double o2consumptionMultOld_orig = 1.2*1.3;
+    public static double o2consumptionMultOld = o2consumptionMultOld_orig;
 
     // This factor can be used to globally multiply the o2 consumption of the fish when using the new o2 consumption model:
-    public static double o2consumptionMultNew = 1.0;
+    public static final double o2consumptionMultNew_orig = 1.0;
+    public static double o2consumptionMultNew = o2consumptionMultNew_orig;
 
     private static boolean addDigestiveO2Cons = false;
 
